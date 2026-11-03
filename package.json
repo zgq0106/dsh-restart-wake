@@ -1,6 +1,6 @@
 {
   "name": "dsh-restart-wake",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Restart DeepSeek Harness safely and wake sessions automatically afterwards. Agent tools for scheduled self-restart, a startup wake registry, and a mutex-guarded restart protocol. 让 Agent 安全重启 DeepSeek Harness，并在重启后自动回到原会话继续工作。",
   "license": "MIT",
   "author": "zgq0106 (https://github.com/zgq0106)",

@@ -27,6 +27,7 @@ import {
   scheduleRestart,
   writeLock,
 } from '../lib/restart.js'
+import { inspectCookieStore } from '../lib/cookie.js'
 import { createTools } from '../lib/tools.js'
 
 let passed = 0
@@ -178,14 +179,21 @@ try {
 
   /* ───────────────────────────── tools ───────────────────────────── */
 
-  test('five tools with unique names', () => {
+  test('six tools with unique names', () => {
     const options = resolveConfig('C:\\pkg', { pendingDir: workDir, exePath: 'C:\\Apps\\My Harness.exe' })
     const tools = createTools(fakeCtx, options)
-    assert.equal(tools.length, 5)
+    assert.equal(tools.length, 6)
     const names = tools.map((tool) => tool.name)
     assert.deepEqual(
       [...new Set(names)],
-      ['restart_now', 'wake_register', 'wake_list', 'wake_cancel', 'restart_status'],
+      [
+        'restart_now',
+        'wake_register',
+        'wake_list',
+        'wake_cancel',
+        'restart_status',
+        'cookie_status',
+      ],
     )
     for (const tool of tools) {
       assert.equal(typeof tool.description, 'string')
@@ -218,11 +226,33 @@ try {
       'singleInstanceWaitSeconds',
       'cookieDbPath',
       'cookieProbePath',
+      'cookieCleanupPath',
+      'cookieThreshold',
       'crashLogDir',
     ]) {
       assert.ok(key in payload, `payload is missing ${key}`)
     }
     assert.equal(payload.delaySeconds, 9)
+  })
+
+  test('cookie inspection reports a missing store instead of failing', () => {
+    const info = inspectCookieStore(join(workDir, 'no-such-dir', 'Cookies'))
+    assert.equal(info.available, false)
+    assert.equal(info.reason, 'missing-db')
+  })
+
+  test('cookie_status reports the missing cleanup script too', async () => {
+    const options = resolveConfig('C:\\pkg', {
+      pendingDir: workDir,
+      exePath: 'C:\\Apps\\My Harness.exe',
+      cookieDbPath: join(workDir, 'nope', 'Cookies'),
+      cookieCleanupPath: join(workDir, 'nope', 'cookie-cleanup.mjs'),
+    })
+    const tool = createTools(fakeCtx, options).find((item) => item.name === 'cookie_status')
+    const value = await tool.execute({})
+    assert.equal(value.available, false)
+    assert.equal(value.threshold, 50)
+    assert.equal(value.cleanupExists, false)
   })
 
   await testAsync('scheduleRestart rejects a missing executable before touching schtasks', async () => {

@@ -2,10 +2,10 @@
 
 让 Agent **安全地重启 DeepSeek Harness，并在重启后自动回到原会话继续干活**。
 
-给 DeepSeek Harness 用的 Host 插件：五个 Agent 工具 + 一个启动唤醒器 + 一套参数化的重启脚本。装上之后，模型可以自己安排重启、自己回来验收，不需要人盯着。
+给 DeepSeek Harness 用的 Host 插件：六个 Agent 工具 + 一个启动唤醒器 + 一套参数化的重启脚本。装上之后，模型可以自己安排重启、自己回来验收，不需要人盯着；同时顺手治掉「重启约 70 次后启动崩溃」的 cookie 堆积问题。
 
 - 插件名：`dsh-restart-wake`
-- 平台：**重启仅 Windows**；唤醒、登记、状态查询跨平台
+- 平台：**重启与 cookie 清理仅 Windows**；唤醒、登记、状态查询跨平台
 - 依赖：无（不引入任何 npm 包）
 - DSH 版本：`0.2.1-rc.5` 实测
 
@@ -55,7 +55,7 @@ dsh plugin --profile desktop add "git+https://github.com/zgq0106/dsh-restart-wak
 
 ---
 
-## 五个工具
+## 六个工具
 
 | 工具 | 作用 |
 |---|---|
@@ -64,6 +64,7 @@ dsh plugin --profile desktop add "git+https://github.com/zgq0106/dsh-restart-wak
 | `wake_list` | 查看待唤醒登记、最近归档、重启锁状态 |
 | `wake_cancel` | 取消本会话的唤醒登记 |
 | `restart_status` | 自检与验收：路径、脚本、锁、运行中会话、日志末尾 |
+| `cookie_status` | 查看 `dsh-auth-*` cookie 堆积情况与清理阈值（431 崩溃的根因） |
 
 调用方不需要手填会话 id：工具从执行上下文 `exec.agent.id` 自动读取。
 
@@ -93,7 +94,8 @@ Agent 调用 restart_now
         ├─ 优雅关窗（Harness 只是隐藏到托盘）
         ├─ 识别浏览器主进程 → 先杀它 → 再杀子进程
         ├─ 等所有进程消失
-        ├─ （可选）cookie 快照
+        ├─ cookie 清理：dsh-auth-* 超过阈值就删（防 431 崩溃）
+        ├─ cookie 快照（只读）
         ├─ 等单实例锁释放（3 秒）
         ├─ 启动 → 等 8 秒 → 数进程，最多重试 3 次
         ├─ 写 RESULT: OK / FAILED
@@ -144,11 +146,42 @@ Agent 调用 restart_now
 | `maxAttempts` | `3` | 单条投递重试次数 |
 | `retryDelayMs` | `15000` | 重试间隔 |
 | `startupDelayMs` | `3000` | 启动后延迟多久开始扫描 |
-| `cookieDbPath` | 空 | 可选：Chromium Cookies 数据库路径，用于重启时快照登录 cookie 寿命 |
-| `cookieProbePath` | 包内 `scripts/cookie-probe.mjs` | 可选：cookie 探针脚本 |
+| `cookieDbPath` | 自动探测 Desktop 的 Cookies 库 | Chromium cookie 库路径 |
+| `cookieProbePath` | 包内 `scripts/cookie-probe.mjs` | cookie 快照脚本 |
+| `cookieCleanupPath` | 包内 `scripts/cookie-cleanup.mjs` | cookie 清理脚本 |
+| `cookieThreshold` | `50` | `dsh-auth-*` 达到这个条数时，重启窗口自动清理（约 11 KB 请求头） |
 | `crashLogDir` | 空 | 可选：崩溃日志目录，用于统计「杀进程有没有新增渲染崩溃」 |
 
 > `pendingDir` 的路径会影响计划任务命令行长度（上限 260 字符）。路径过长时 `restart_now` 会直接报错并建议换到更短的目录。
+
+---
+
+## 431 启动崩溃与 cookie 清理
+
+Harness 桌面端每次启动都监听随机端口，并下发一个 `dsh-auth-<authority哈希>` cookie。端口变、名字就变，Chromium 只累加不清理；攒到约 70 条时 Cookie 请求头超过 Node 的 16 KB 上限，Host 返回 `431 Request Header Fields Too Large`，外壳只检查 `response.ok`，于是报「Web authentication failed」并退出。
+
+这个文件在 Harness 运行期间被独占，唯一可读写的窗口就是「浏览器进程已死、新实例未起」的那几秒——正好是重启脚本执行的时候。所以插件每次重启都做两件事：
+
+1. `scripts/cookie-cleanup.mjs`：统计 `dsh-auth-*` 条数，达到 `cookieThreshold`（默认 50，约 11 KB）就只删这一族，其它 cookie 与账号凭据不碰；
+2. `scripts/cookie-probe.mjs`：记录新实例启动前的 cookie 数量与剩余寿命。
+
+日志行形如：
+
+```text
+cookie cleanup: authCookies=52 others=38 headerKB=11 threshold=50 action=purged removed=52
+cookie snapshot: authCookies=0 ttl=[]
+```
+
+要手动清理（例如已经启动不了、连重启脚本都跑不了）：
+
+```powershell
+node <包目录>\scripts\cookie-cleanup.mjs "$env:APPDATA\@deepseek-ai\dsh-desktop\Network\Cookies" --dry-run
+node <包目录>\scripts\cookie-cleanup.mjs "$env:APPDATA\@deepseek-ai\dsh-desktop\Network\Cookies"
+```
+
+手动清理必须**完全退出 Harness**。`cookie_status` 能读到时会报当前条数；运行中读不到是正常的（文件被独占）。
+
+另一个缓解手段在 profile 配置里：把 `client-connection.cookieMaxAgeDays` 从默认 30 调到 1，把累积窗口压到单日。插件不替你改这份配置。
 
 ---
 
@@ -167,6 +200,7 @@ Agent 调用 restart_now
 ## 平台与限制
 
 - **重启**：仅 Windows（`schtasks` + PowerShell）。非 Windows 上 `restart_now` 直接报错，不做任何破坏性动作。
+- **cookie 清理**：仅 Windows（Desktop 默认路径）。手动清理需要完全退出 Harness。
 - **唤醒**：纯 Node，跨平台可用。
 - 重启会中断当前回合；未保存的输入会丢失。
 - 前提是 Harness 桌面端会恢复上次窗口（默认会）。即使不恢复，登记也不会丢，主人在下次打开会话时补投，只是不再「自动回来」。
@@ -199,14 +233,16 @@ node test/smoke.mjs        # 离线测试，不需要 Harness / 计划任务
 
 ```
 index.js                   宿主插件入口（唤醒 + 注册工具）
-lib/config.js              配置解析与可执行文件探测
+lib/config.js              配置解析、可执行文件与 cookie 库探测
+lib/cookie.js              cookie 库只读检查
 lib/pending.js             唤醒登记文件
 lib/wake.js                启动唤醒循环
 lib/restart.js             互斥锁、会话检查、计划任务、日志
-lib/tools.js               五个 Agent 工具
+lib/tools.js               六个 Agent 工具
 scripts/restart-dsh.ps1    参数化重启脚本（纯 ASCII）
 scripts/run-restart.cmd    计划任务入口
-scripts/cookie-probe.mjs   可选的 cookie 快照
+scripts/cookie-cleanup.mjs 重启窗口内的 cookie 清理
+scripts/cookie-probe.mjs   cookie 快照
 docs/restart-protocol.md   给 Agent 看的重启协议
 ```
 

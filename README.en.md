@@ -2,10 +2,10 @@
 
 Restart DeepSeek Harness **safely**, and wake sessions back up **automatically** afterwards.
 
-A Host plugin for DeepSeek Harness: five Agent tools, a startup wake dispatcher, and parameterized restart scripts. An agent can schedule its own restart, survive it, and continue working — no human babysitting.
+A Host plugin for DeepSeek Harness: six Agent tools, a startup wake dispatcher, and parameterized restart scripts. An agent can schedule its own restart, survive it, and continue working — no human babysitting. It also cleans up the cookie pile-up that crashes Harness after roughly 70 launches.
 
 - Package: `dsh-restart-wake`
-- Platform: **restart is Windows-only**; wake, registry and status work everywhere
+- Platform: **restart and cookie cleanup are Windows-only**; wake, registry and status work everywhere
 - Dependencies: none
 - Tested with DSH `0.2.1-rc.5`
 
@@ -60,6 +60,7 @@ If `exePath` is missing, set it explicitly in the plugin config (see *Configurat
 | `wake_list` | Pending entries, recent archives, mutex state |
 | `wake_cancel` | Remove this session's wake-up |
 | `restart_status` | Self-check and post-restart verification |
+| `cookie_status` | `dsh-auth-*` cookie count, estimated header size, cleanup threshold |
 
 The caller does not pass a session id: it is read from the tool execution context (`exec.agent.id`).
 
@@ -88,7 +89,8 @@ restart_now
         ├─ graceful close (Harness only hides to tray)
         ├─ kill browser process first, then children
         ├─ wait for every process to exit
-        ├─ optional cookie snapshot
+        ├─ purge dsh-auth-* cookies above the threshold (prevents 431)
+        ├─ cookie snapshot (read-only)
         ├─ wait for the single-instance lock
         ├─ launch → wait → verify, up to 3 attempts
         ├─ log RESULT: OK / FAILED
@@ -139,11 +141,42 @@ To change anything, override the row in the profile's `cordis.patch.yml` (`confi
 | `maxAttempts` | `3` | Delivery attempts per entry |
 | `retryDelayMs` | `15000` | Delay between attempts |
 | `startupDelayMs` | `3000` | Delay before the first scan |
-| `cookieDbPath` | empty | Optional Chromium Cookies DB for a per-restart snapshot |
-| `cookieProbePath` | bundled | Optional cookie-probe script |
+| `cookieDbPath` | auto-detected Desktop store | Chromium cookie database |
+| `cookieProbePath` | bundled | Cookie snapshot script |
+| `cookieCleanupPath` | bundled | Cookie cleanup script |
+| `cookieThreshold` | `50` | Purge `dsh-auth-*` in the restart window at this count (~11 KB header) |
 | `crashLogDir` | empty | Optional crash-log directory for the crash-report check |
 
 > `pendingDir` length affects the Task Scheduler command line (260-character limit). `restart_now` refuses to schedule with a clear message when it would overflow.
+
+---
+
+## The 431 startup crash and cookie cleanup
+
+Every launch the Desktop Host listens on a random port and mints one `dsh-auth-<authority-hash>` cookie. New port, new name; Chromium only accumulates. Around 70 entries the Cookie request header passes Node's 16 KB limit, the Host answers `431 Request Header Fields Too Large`, the shell checks only `response.ok`, and startup aborts with "Web authentication failed".
+
+That file is held exclusively while Harness runs, so the only readable window is between the browser process dying and the next instance starting — exactly where the restart script runs. On every restart the plugin:
+
+1. `scripts/cookie-cleanup.mjs` — counts `dsh-auth-*` and, once the count reaches `cookieThreshold` (default 50, ~11 KB), deletes only that family; other cookies and account credentials are untouched;
+2. `scripts/cookie-probe.mjs` — records the count and remaining lifetime after cleanup.
+
+Log lines look like:
+
+```text
+cookie cleanup: authCookies=52 others=38 headerKB=11 threshold=50 action=purged removed=52
+cookie snapshot: authCookies=0 ttl=[]
+```
+
+Manual cleanup (when Harness no longer starts):
+
+```powershell
+node <package>\scripts\cookie-cleanup.mjs "$env:APPDATA\@deepseek-ai\dsh-desktop\Network\Cookies" --dry-run
+node <package>\scripts\cookie-cleanup.mjs "$env:APPDATA\@deepseek-ai\dsh-desktop\Network\Cookies"
+```
+
+Manual cleanup requires a fully exited Harness. `cookie_status` can only report while the file is readable; failing to read it during a running Host is expected.
+
+A second mitigation lives in the profile config: lower `client-connection.cookieMaxAgeDays` from 30 to 1 to shrink the accumulation window to a single day. The plugin does not change that config for you.
 
 ---
 
@@ -162,6 +195,7 @@ To change anything, override the row in the profile's `cordis.patch.yml` (`confi
 ## Limits
 
 - **Restart**: Windows only (`schtasks` + PowerShell). On other platforms `restart_now` fails without side effects.
+- **Cookie cleanup**: Windows only (Desktop default path); manual cleanup needs a fully exited Harness.
 - **Wake**: plain Node, cross-platform.
 - A restart interrupts the current turn; unsaved input is lost.
 - If another "deliver on startup" plugin shares the same `pendingDir`, entries may be delivered twice — give each plugin its own directory.

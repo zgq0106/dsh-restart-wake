@@ -45,6 +45,9 @@ $launchWait = [int]$cfg.launchWaitSeconds
 $maxAttempts = [int]$cfg.maxLaunchAttempts
 $cookieDb = [string]$cfg.cookieDbPath
 $cookieProbe = [string]$cfg.cookieProbePath
+$cookieCleanup = [string]$cfg.cookieCleanupPath
+$cookieThreshold = [int]$cfg.cookieThreshold
+if ($cookieThreshold -le 0) { $cookieThreshold = 50 }
 $crashDir = [string]$cfg.crashLogDir
 
 $logDir = Split-Path -Parent $log
@@ -149,14 +152,32 @@ while (((HarnessProcesses).Count -gt 0) -and $waited -lt $killTimeout) {
 Log "after force kill: $((HarnessProcesses).Count) process(es) remaining, waited ${waited}s"
 Log "renderer crash reports after kill: $(CrashCount)"
 
-# --- 3b) cookie snapshot (read-only, optional) ---
+# --- 3b) cookie hygiene (optional, and only possible in this window) ---
 # Chromium holds the Cookies SQLite file exclusively while it runs, so this
 # window -- browser dead, new instance not yet started -- is the only moment the
-# file is readable. Read-only; failures never block the restart.
+# file is readable and writable.
+#
+# Cleanup first: the Desktop Host mints a new dsh-auth-<authority-hash> cookie on
+# every launch and Chromium never removes old names. Around 70 entries the Cookie
+# header passes Node's 16 KB limit, the Host answers 431, and the Electron shell
+# reports "Web authentication failed" and aborts startup. Purging only
+# dsh-auth-% rows keeps that from ever happening; every other cookie and the
+# account credentials are untouched.
+#
+# The snapshot afterwards records what the new instance starts with.
 try {
+  $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+  $nodeExe = if ($nodeCmd) { $nodeCmd.Source } else { 'node' }
+
+  if ($cookieDb -and $cookieCleanup -and (Test-Path -LiteralPath $cookieCleanup) -and (Test-Path -LiteralPath $cookieDb)) {
+    $cleanup = (& $nodeExe $cookieCleanup $cookieDb --auto "--threshold=$cookieThreshold" 2>&1 | Out-String).Trim()
+    if ([string]::IsNullOrWhiteSpace($cleanup)) { $cleanup = '(no output)' }
+    Log "cookie cleanup: $cleanup"
+  } else {
+    Log 'cookie cleanup skipped: script or Cookies DB missing'
+  }
+
   if ($cookieDb -and $cookieProbe -and (Test-Path -LiteralPath $cookieProbe) -and (Test-Path -LiteralPath $cookieDb)) {
-    $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
-    $nodeExe = if ($nodeCmd) { $nodeCmd.Source } else { 'node' }
     $snapshot = (& $nodeExe $cookieProbe $cookieDb 2>&1 | Out-String).Trim()
     if ([string]::IsNullOrWhiteSpace($snapshot)) { $snapshot = '(no output)' }
     Log "cookie snapshot: $snapshot"
@@ -164,7 +185,7 @@ try {
     Log 'cookie snapshot skipped: probe script or Cookies DB missing'
   }
 } catch {
-  Log "cookie snapshot failed: $($_.Exception.Message)"
+  Log "cookie hygiene failed: $($_.Exception.Message)"
 }
 
 # Electron keeps a single-instance lock briefly; launching too early makes the
