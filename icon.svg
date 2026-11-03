@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Restart and Wake">
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#16233b"/>
+  <path d="M44 32a14 14 0 1 1-4.2-10" fill="none" stroke="#6fd3ff" stroke-width="4" stroke-linecap="round"/>
+  <path d="M44 20v8h-8" fill="none" stroke="#6fd3ff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M35 36h15a4 4 0 0 1 4 4v7a4 4 0 0 1-4 4h-1.5v4.5L43 51h-8a4 4 0 0 1-4-4v-7a4 4 0 0 1 4-4z" fill="#ffffff" opacity="0.96"/>
+  <circle cx="37.5" cy="43.5" r="1.6" fill="#16233b"/>
+  <circle cx="43" cy="43.5" r="1.6" fill="#16233b"/>
+  <circle cx="48.5" cy="43.5" r="1.6" fill="#16233b"/>
+</svg>

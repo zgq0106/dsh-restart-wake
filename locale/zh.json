@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "重启唤醒",
+    "description": "让 Agent 安全重启 Harness，并在重启完成后自动唤醒原会话继续工作。"
+  }
+}

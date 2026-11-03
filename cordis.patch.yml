@@ -1,0 +1,16 @@
+# dsh-restart-wake
+#
+# One Host row. It does two things on every Host startup:
+#   1. clears a stale restart mutex left by a previous restart, and
+#   2. delivers every registered wake-up (wake-pending-*.json) through
+#      sessionController.prompt, which resumes cold sessions automatically.
+#
+# It also registers five Agent tools (restart_now / wake_register / wake_list /
+# wake_cancel / restart_status). No Client half, no UI.
+#
+# Every config field is optional; omit this `config` block to use the defaults.
+# `exePath` is detected from the running Electron executable when omitted, so a
+# stock Desktop install needs no configuration at all.
+- insert:
+    - id: restart-wake
+      name: dsh-restart-wake

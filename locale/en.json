@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Restart & Wake",
+    "description": "Safely restart DeepSeek Harness and automatically wake sessions back up afterwards."
+  }
+}
