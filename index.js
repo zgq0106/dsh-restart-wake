@@ -6,8 +6,12 @@
  *   2. delivers every registered wake-up through `sessionController.prompt`,
  *      which resumes cold sessions automatically.
  *
- * It also registers five Agent tools:
- *   restart_now / wake_register / wake_list / wake_cancel / restart_status
+ * It also registers six Agent tools:
+ *   restart_now / wake_register / wake_list / wake_cancel / restart_status / cookie_status
+ *
+ * And one prompt section, so an Agent without its own notes still knows when a
+ * restart is warranted, that it must be the last action of the turn, and that it
+ * should verify afterwards.
  *
  * There is no Client half: the plugin has no UI of its own.
  */
@@ -16,6 +20,7 @@ import { existsSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { resolveConfig } from './lib/config.js'
+import { registerRestartPrompt } from './lib/prompt.js'
 import { createTools } from './lib/tools.js'
 import { startWakeLoop } from './lib/wake.js'
 
@@ -53,6 +58,10 @@ export function apply(ctx, config = {}) {
   }
 
   startWakeLoop(ctx, options)
+
+  if (!registerRestartPrompt(ctx, options)) {
+    warn('systemPrompt 不可用或已关闭：跳过内置协议提示，工具仍可用。')
+  }
 
   for (const tool of createTools(ctx, options)) {
     const register = () => ctx.tools.register(tool)

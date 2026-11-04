@@ -28,6 +28,8 @@ import {
   writeLock,
 } from '../lib/restart.js'
 import { inspectCookieStore } from '../lib/cookie.js'
+import { restartPromptText } from '../lib/prompt.js'
+import { WAKE_CLEANUP_NOTE } from '../lib/wake.js'
 import { createTools } from '../lib/tools.js'
 
 let passed = 0
@@ -178,6 +180,24 @@ try {
   })
 
   /* ───────────────────────────── tools ───────────────────────────── */
+
+  test('built-in protocol prompt states the rules', () => {
+    const text = restartPromptText()
+    for (const needle of ['restart_now', '最后一步', 'RESULT: OK', 'restart_status', 'wake_register', 'schedule_delete']) {
+      assert.ok(text.includes(needle), `prompt is missing ${needle}`)
+    }
+    assert.ok(text.length < 1200, 'prompt is too long to inject on every step')
+  })
+
+  test('promptEnabled defaults to true and can be turned off', () => {
+    assert.equal(resolveConfig('C:\\pkg', {}).promptEnabled, true)
+    assert.equal(resolveConfig('C:\\pkg', { promptEnabled: false }).promptEnabled, false)
+  })
+
+  test('wake delivery appends the schedule cleanup note', () => {
+    assert.ok(WAKE_CLEANUP_NOTE.includes('schedule_delete'))
+    assert.ok(WAKE_CLEANUP_NOTE.includes('inactive'))
+  })
 
   test('six tools with unique names', () => {
     const options = resolveConfig('C:\\pkg', { pendingDir: workDir, exePath: 'C:\\Apps\\My Harness.exe' })

@@ -68,6 +68,12 @@ dsh plugin --profile desktop add "git+https://github.com/zgq0106/dsh-restart-wak
 
 调用方不需要手填会话 id：工具从执行上下文 `exec.agent.id` 自动读取。
 
+### 内置协议提示（不依赖 Agent 自己的记忆）
+
+插件通过 `ctx.systemPrompt.section()` 在 Host 根作用域注册一段说明，**所有经过这个 profile 的 Agent 每一步都会看到**：何时该重启、`restart_now` 必须是本轮最后一步、重启后先 `restart_status` 验收。换一个没有自己笔记的 Agent 或预设，它同样知道该怎么做。
+
+提示固定约 300 字；已把同样规则写进预设、不想重复时，配置 `promptEnabled: false` 关闭。
+
 ### 典型用法（Agent 侧）
 
 ```text
@@ -150,6 +156,7 @@ Agent 调用 restart_now
 | `cookieProbePath` | 包内 `scripts/cookie-probe.mjs` | cookie 快照脚本 |
 | `cookieCleanupPath` | 包内 `scripts/cookie-cleanup.mjs` | cookie 清理脚本 |
 | `cookieThreshold` | `50` | `dsh-auth-*` 达到这个条数时，重启窗口自动清理（约 11 KB 请求头） |
+| `promptEnabled` | `true` | 是否向所有 Agent 注入内置协议提示 |
 | `crashLogDir` | 空 | 可选：崩溃日志目录，用于统计「杀进程有没有新增渲染崩溃」 |
 
 > `pendingDir` 的路径会影响计划任务命令行长度（上限 260 字符）。路径过长时 `restart_now` 会直接报错并建议换到更短的目录。

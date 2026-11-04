@@ -64,6 +64,12 @@ If `exePath` is missing, set it explicitly in the plugin config (see *Configurat
 
 The caller does not pass a session id: it is read from the tool execution context (`exec.agent.id`).
 
+### Built-in protocol prompt (independent of the agent's own memory)
+
+The plugin registers a section through `ctx.systemPrompt.section()` on the Host root scope, so **every Agent in this profile sees it on every step**: when a restart is warranted, that `restart_now` must be the last action of the turn, and that it should verify with `restart_status` afterwards. An agent with no notes of its own — or a different preset — still knows what to do.
+
+The text is fixed at roughly 300 characters. Set `promptEnabled: false` when your preset already carries the same rules.
+
 ### Typical flow
 
 ```text
@@ -145,6 +151,7 @@ To change anything, override the row in the profile's `cordis.patch.yml` (`confi
 | `cookieProbePath` | bundled | Cookie snapshot script |
 | `cookieCleanupPath` | bundled | Cookie cleanup script |
 | `cookieThreshold` | `50` | Purge `dsh-auth-*` in the restart window at this count (~11 KB header) |
+| `promptEnabled` | `true` | Inject the built-in protocol prompt into every Agent |
 | `crashLogDir` | empty | Optional crash-log directory for the crash-report check |
 
 > `pendingDir` length affects the Task Scheduler command line (260-character limit). `restart_now` refuses to schedule with a clear message when it would overflow.
