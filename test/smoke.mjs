@@ -5,18 +5,20 @@
  */
 
 import assert from 'node:assert/strict'
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as plugin from '../index.js'
 import { resolveConfig, detectExecutable } from '../lib/config.js'
 import {
   archive,
+  discard,
   hasPending,
   isExpired,
   listArchived,
   listPending,
   pendingFileName,
+  pruneArchives,
   removePending,
   writePending,
 } from '../lib/pending.js'
@@ -197,6 +199,38 @@ try {
   test('wake delivery appends the schedule cleanup note', () => {
     assert.ok(WAKE_CLEANUP_NOTE.includes('schedule_delete'))
     assert.ok(WAKE_CLEANUP_NOTE.includes('inactive'))
+  })
+
+  test('discard removes a delivered entry', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'restart-wake-discard-'))
+    try {
+      const file = writePending(dir, 'session-discard', 'x')
+      assert.equal(discard(file), true)
+      assert.equal(existsSync(file), false)
+      assert.equal(readdirSync(dir).filter((name) => name.startsWith('wake-pending')).length, 0)
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('pruneArchives drops done files and keeps the newest failures', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'restart-wake-prune-'))
+    try {
+      for (let i = 0; i < 3; i += 1) {
+        writeFileSync(join(dir, `wake-done-session-a-2026-11-04T00-00-0${i}-000Z.json`), '{}')
+      }
+      for (let i = 10; i < 22; i += 1) {
+        writeFileSync(join(dir, `wake-failed-session-b-2026-11-04T00-00-${i}-000Z.json`), '{}')
+      }
+      const removed = pruneArchives(dir, 10)
+      const left = readdirSync(dir)
+      assert.equal(removed, 5, 'three done files plus the two oldest failures')
+      assert.equal(left.filter((name) => name.startsWith('wake-done-')).length, 0)
+      assert.equal(left.filter((name) => name.startsWith('wake-failed-')).length, 10)
+      assert.ok(left.includes('wake-failed-session-b-2026-11-04T00-00-21-000Z.json'))
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+    }
   })
 
   test('six tools with unique names', () => {

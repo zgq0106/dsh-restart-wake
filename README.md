@@ -82,7 +82,7 @@ dsh plugin --profile desktop add "git+https://github.com/zgq0106/dsh-restart-wak
 2. restart_now({ prompt: "重启完成，读取日志确认 RESULT: OK，然后继续完成 P2.4 连线可视化" })
 3. 回复主人：「已安排重启，约 12 秒后回来」，本回合结束
 4. 重启后插件自动投递 prompt，会话继续
-5. restart_status        → 验收：锁已释放、登记已归档、日志末尾 RESULT: OK
+5. restart_status        → 验收：锁已释放、登记已消费、日志末尾 RESULT: OK
 ```
 
 ---
@@ -158,6 +158,8 @@ Agent 调用 restart_now
 | `cookieThreshold` | `50` | `dsh-auth-*` 达到这个条数时，重启窗口自动清理（约 11 KB 请求头） |
 | `promptEnabled` | `true` | 是否向所有 Agent 注入内置协议提示 |
 | `crashLogDir` | 空 | 可选：崩溃日志目录，用于统计「杀进程有没有新增渲染崩溃」 |
+| `keepArchives` | `10` | 失败/过期/重复归档最多保留几个，更早的启动时自动删 |
+| `maxLogBytes` | `262144` | `wake.log` 超过这个字节数就轮转为 `wake.log.1`（最多两个日志文件） |
 
 > `pendingDir` 的路径会影响计划任务命令行长度（上限 260 字符）。路径过长时 `restart_now` 会直接报错并建议换到更短的目录。
 
@@ -196,6 +198,8 @@ node <包目录>\scripts\cookie-cleanup.mjs "$env:APPDATA\@deepseek-ai\dsh-deskt
 
 - 只投递文本，不执行命令；
 - 每条登记最多投递 3 次，失败归档，**绝不无限重试**；
+- **成功投递不留文件**（只写日志一行）；失败/过期/重复归档最多保留 10 个，更早的启动时自动删；
+- `wake.log` 超过 256 KB 轮转为 `wake.log.1`，目录里最多两个日志文件；
 - 登记超过 24 小时自动过期；
 - 互斥锁保证同一时刻只有一次重启；
 - 默认拒绝在「其他未登记的运行中会话」存在时重启（`force: true` 可覆盖）；

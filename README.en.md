@@ -77,7 +77,7 @@ The text is fixed at roughly 300 characters. Set `promptEnabled: false` when you
 2. restart_now({ prompt: "Read the restart log, confirm RESULT: OK, continue the task" })
 3. reply "restarting in ~12s", end the turn
 4. the plugin wakes this session after the restart
-5. restart_status        → lock released, entry archived, log ends with RESULT: OK
+5. restart_status        → lock released, entry consumed, log ends with RESULT: OK
 ```
 
 ---
@@ -152,6 +152,8 @@ To change anything, override the row in the profile's `cordis.patch.yml` (`confi
 | `cookieCleanupPath` | bundled | Cookie cleanup script |
 | `cookieThreshold` | `50` | Purge `dsh-auth-*` in the restart window at this count (~11 KB header) |
 | `promptEnabled` | `true` | Inject the built-in protocol prompt into every Agent |
+| `keepArchives` | `10` | Failure/expiry/duplicate archives to keep; older ones are pruned at startup |
+| `maxLogBytes` | `262144` | Rotate `wake.log` to `wake.log.1` past this size (at most two log files) |
 | `crashLogDir` | empty | Optional crash-log directory for the crash-report check |
 
 > `pendingDir` length affects the Task Scheduler command line (260-character limit). `restart_now` refuses to schedule with a clear message when it would overflow.
@@ -191,6 +193,8 @@ A second mitigation lives in the profile config: lower `client-connection.cookie
 
 - Only text is delivered, never a command.
 - At most 3 delivery attempts per entry; failures are archived, never retried forever.
+- **A successful delivery leaves no file** (one log line only); failure/expiry/duplicate archives keep only the newest 10, pruned at startup.
+- `wake.log` rotates to `wake.log.1` past 256 KB, so the directory holds at most two log files.
 - Entries expire after 24 hours.
 - A mutex allows one restart at a time.
 - By default it refuses to restart while another unregistered session is running (`force: true` overrides).
