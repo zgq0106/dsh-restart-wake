@@ -53,11 +53,11 @@
 
 等待期间挂的重检提醒，重启后仍然存在。如果不清掉，它会在新进程里再次到点触发——轻则多跑一轮检查，重则再发起一次重启。
 
-`schedule_delete` 对 **active 和 inactive 都有效**，难点只在拿到 id：`schedule_list` 只列未触发的，已触发的必须按 id 删。所以：
+`schedule_edit({ id, action: 'delete' })` 对 **active 和 inactive 都有效**（DSH 0.2.2 起 `schedule_delete` 已移除），难点只在拿到 id：`schedule_list` 只列未触发的，已触发的必须按 id 删。所以：
 
-1. `schedule_create` 时**记下返回的 id**；
-2. 确定可以重启时：`schedule_delete(id)` → `restart_now`；
-3. 重启后醒来：**再按同一个 id `schedule_delete` 一次**，把已结束的记录也清掉——这一条对「等待中、被别人唤醒」的会话同样适用：它醒来后第一件事就是删自己的重检提醒，再继续。
+1. `schedule_create` 时**记下返回的 id**（0.2.2 起还需 `target: 'this_session'`，时间用 `rrule` 两行：`DTSTART;TZID=Asia/Shanghai:YYYYMMDDTHHMMSS` + `RRULE:FREQ=DAILY;COUNT=1`）；
+2. 确定可以重启时：`schedule_edit({ id, action: 'delete' })` → `restart_now`；
+3. 重启后醒来：**再按同一个 id `schedule_edit({ id, action: 'delete' })` 一次**，把已结束的记录也清掉——这一条对「等待中、被别人唤醒」的会话同样适用：它醒来后第一件事就是删自己的重检提醒，再继续。
 
 > 一般性的定期提醒（例如每日简报）不要删；只删为这次重启临时挂的重检项。
 

@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.6 (2026-11-12)
+
+适配 DSH 0.2.2-rc.2 的 Schedule 工具改名。
+
+DSH 0.2.2-alpha.2 移除了 `schedule_update` 与 `schedule_delete`，统一改用 `schedule_edit`（`action: "update" | "delete"`），`schedule_create` 也不再接受 `after_seconds`、`at`、`daily` 等时间选择参数，改为必填 `rrule`（两行 `DTSTART` + `RRULE`）与 `target`。本插件注入的文本此前仍在教模型调用已删除的工具。
+
+- **协议提示改写**：`lib/prompt.js` 的重检提醒改为 `schedule_create({ title, prompt, target: "this_session", rrule })`，清理改用 `schedule_edit({ id, action: "delete" })`。
+- **唤醒清理提示改写**：`WAKE_CLEANUP_NOTE`（`lib/wake.js`）同步改为 `schedule_edit`。
+- **文档同步**：`docs/restart-protocol.md` 的「先清提醒再重启」一节更新工具名与 rrule 写法。
+- **测试收紧**：断言提示文本包含 `schedule_edit` 且**不再包含** `schedule_delete`，防止残留旧名回归。
+- **声明适配范围**：`engines.dsh` 设为 `>=0.2.2-alpha.2`，低于该版本会被兼容性检查拒绝安装；`dsh.compatibility.dshReleases` 记 `0.2.2-rc.2` 实测。旧版 DSH 请继续用 v0.1.5——它指向的 `schedule_delete` / `after_seconds` 在 0.2.2 起已不存在。
+
 ## 0.1.5 (2026-11-04)
 
 插件自己管理文件生命周期，用户永远不需要清理残留。

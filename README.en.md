@@ -7,7 +7,16 @@ A Host plugin for DeepSeek Harness: six Agent tools, a startup wake dispatcher, 
 - Package: `dsh-restart-wake`
 - Platform: **restart and cookie cleanup are Windows-only**; wake, registry and status work everywhere
 - Dependencies: none
-- Tested with DSH `0.2.1-rc.5`
+- DSH version: requires **≥ `0.2.2-alpha.2`**; tested on `0.2.2-rc.2` (see the compatibility table below)
+
+## DSH compatibility
+
+The protocol prompt injects Schedule-tool guidance. DSH `0.2.2-alpha.2` made `rrule` and `target` required on `schedule_create` and replaced `schedule_update` / `schedule_delete` with `schedule_edit`. Keep the versions aligned, or the prompt will point at tools that no longer exist:
+
+| Plugin | Supported DSH | Notes |
+|---|---|---|
+| **v0.1.6** | **≥ `0.2.2-alpha.2`** | Prompts use `schedule_edit` and `rrule`; `engines.dsh` declares it, so older releases are refused at install |
+| v0.1.0 – v0.1.5 | `< 0.2.2-alpha.2` | Prompts use `schedule_delete` and `after_seconds`, both removed in newer DSH |
 
 ---
 

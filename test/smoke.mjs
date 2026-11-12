@@ -185,9 +185,10 @@ try {
 
   test('built-in protocol prompt states the rules', () => {
     const text = restartPromptText()
-    for (const needle of ['restart_now', '最后一步', 'RESULT: OK', 'restart_status', 'wake_register', 'schedule_delete']) {
+    for (const needle of ['restart_now', '最后一步', 'RESULT: OK', 'restart_status', 'wake_register', 'schedule_edit']) {
       assert.ok(text.includes(needle), `prompt is missing ${needle}`)
     }
+    assert.ok(!text.includes('schedule_delete'), 'prompt still mentions the removed schedule_delete tool')
     assert.ok(text.length < 1200, 'prompt is too long to inject on every step')
   })
 
@@ -197,7 +198,8 @@ try {
   })
 
   test('wake delivery appends the schedule cleanup note', () => {
-    assert.ok(WAKE_CLEANUP_NOTE.includes('schedule_delete'))
+    assert.ok(WAKE_CLEANUP_NOTE.includes('schedule_edit'))
+    assert.ok(!WAKE_CLEANUP_NOTE.includes('schedule_delete'))
     assert.ok(WAKE_CLEANUP_NOTE.includes('inactive'))
   })
 

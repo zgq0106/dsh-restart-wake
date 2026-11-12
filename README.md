@@ -7,7 +7,18 @@
 - 插件名：`dsh-restart-wake`
 - 平台：**重启与 cookie 清理仅 Windows**；唤醒、登记、状态查询跨平台
 - 依赖：无（不引入任何 npm 包）
-- DSH 版本：`0.2.1-rc.5` 实测
+- DSH 版本：要求 **≥ `0.2.2-alpha.2`**；`0.2.2-rc.2` 实测（见下方兼容表）
+
+## 兼容的 DSH 版本
+
+本插件的协议提示会指导 Agent 调用 Schedule 工具。DSH `0.2.2-alpha.2` 把 `schedule_create` 的时间参数改成必填 `rrule` + `target`，并移除 `schedule_update` / `schedule_delete`（统一为 `schedule_edit`）。因此版本要对上，否则提示会指向不存在的工具：
+
+| 插件版本 | 支持的 DSH 版本 | 说明 |
+|---|---|---|
+| **v0.1.6** | **≥ `0.2.2-alpha.2`** | 提示使用 `schedule_edit` 与 `rrule`；`package.json` 的 `engines.dsh` 已声明，低于该版本会被兼容性检查拒绝安装 |
+| v0.1.0 – v0.1.5 | `< 0.2.2-alpha.2` | 提示使用 `schedule_delete` 与 `after_seconds`；在新版 DSH 上这两个工具已不存在 |
+
+要换版本时：升 DSH 到 0.2.2 及以上就装 v0.1.6；还在 0.2.1 及以前请留在 v0.1.5。
 
 ---
 
