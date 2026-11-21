@@ -1888,6 +1888,24 @@ export function structuralErrorText(signal, probes = []) {
 }
 
 /**
+ * 让 debride 的 state 白名单接受生产状态目录。
+ *
+ * debride 默认只认「本模块所在根」（开发时即工作区、随包分发时即包根），并故意拒绝 `~/.dsh`；
+ * 而这里传进去的 root 是 `<状态目录>/quarantine`，生产即 `~/.dsh/ownshield/quarantine`。
+ * 设计 2.2 的约定正是由调用方用 OWNSHIELD_STATE_ALLOW 显式加白，不改 debride 的默认边界。
+ */
+function allowDebrideStateRoot(dir) {
+  const target = path.resolve(dir);
+  const list = String(process.env.OWNSHIELD_STATE_ALLOW || '')
+    .split(';')
+    .map((item) => item.trim())
+    .filter(Boolean);
+  const already = list.some((item) => path.resolve(item).toLowerCase() === target.toLowerCase());
+  if (!already) process.env.OWNSHIELD_STATE_ALLOW = [...list, target].join(';');
+  return target;
+}
+
+/**
  * tool-inventory / service-inventory 缺失时的处置链：
  *   归因（只读）→ 命中则隔离（默认 dry-run，需 --allow-quarantine 才真写）→ 探针复核 → 写病历；
  *   未命中退回 L2 整包回滚。
@@ -1913,6 +1931,7 @@ export function runStructuralDebride({
     recovered: deps.recordRecovered ?? debrideRecordRecovered,
     rolledBack: deps.recordRolledBack ?? debrideRecordRolledBack,
   };
+  allowDebrideStateRoot(paths.ownshield);
   const root = path.join(paths.ownshield, 'quarantine');
   const patchPath =
     arm?.profilePatchPath ||

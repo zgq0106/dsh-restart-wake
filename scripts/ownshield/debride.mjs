@@ -10,12 +10,12 @@
  *   1. 只 move 不删：被摘的 YAML 行/插件包整体移入 quarantine/<ts>/，原文件留一行注释；
  *   2. 其余字节一个不动：隔离前后分别算 sha256，并把「去掉插入注释后应与原文剩余部分逐字节相同」
  *      作为硬校验；
- *   3. 不碰真实 profile、不碰 E:\DeepSeekHarness：默认拒绝 ~/.dsh/profiles/** 的写入，
+ *   3. 不碰真实 profile、不碰安装目录：默认拒绝 ~/.dsh/profiles/** 的写入，
  *      要动真实 profile 必须显式 --allow-real-profile（本阶段禁止使用）。
  *
  * state 根（隔离区、病历、临时 state 的落点）：
  *   - 可配置：--state-dir 或环境变量 OWNSHIELD_STATE_DIR；
- *   - 默认：<工作区>/work/ownshield；
+ *   - 默认：<本模块所在根>/work/ownshield（开发时即工作区，随包分发时即包根）；
  *   - 输入校验：必须在允许列表内（默认仅工作区；生产可用 OWNSHIELD_STATE_ALLOW 显式加白），
  *     越界直接报错退出（exit 2），不静默写到别处。
  *   将来插件跑生产时把 OWNSHIELD_STATE_DIR 指到 ~/.dsh/ownshield，并把该路径加进
@@ -44,28 +44,54 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { resolveInstalledExe } from './arm.mjs';
 
 const SELF = fileURLToPath(import.meta.url);
 const SCRIPT_DIR = fs.realpathSync(path.dirname(SELF));
-/** 本模块所在工作区（tools/ownshield/ 的上两级）。state 根必须落在工作区内。 */
+/** 本模块所在根的两级上：开发时是工作区，随包分发时是包根。state 根必须落在白名单内。 */
 export const WORKSPACE_ROOT = path.resolve(SCRIPT_DIR, '..', '..');
 const REAL_PROFILES = path.join(os.homedir(), '.dsh', 'profiles');
-/** 安装根由 asar 推导（OWNSHIELD_ASAR / OWNSHIELD_EXE 可覆盖）；语义不变：仍拒绝写安装目录。 */
-const DEFAULT_EXE = 'E:\\DeepSeekHarness\\DeepSeek Harness.exe';
-function resolveInstallRoot() {
-  const asarOverride = String(process.env.OWNSHIELD_ASAR || '').trim();
-  const asar = asarOverride
-    ? path.resolve(asarOverride)
-    : path.join(
-        path.dirname(String(process.env.OWNSHIELD_EXE || DEFAULT_EXE).trim() || DEFAULT_EXE),
-        'resources',
-        'app.asar',
-      );
-  return path.dirname(path.dirname(asar));
-}
-const FORBIDDEN_ROOTS = [resolveInstallRoot()];
 
-/** state 允许列表：默认只允许工作区；生产装成插件后可用 OWNSHIELD_STATE_ALLOW 显式加白。 */
+/** 由可执行文件反推安装根：<install>/resources/app.asar 的上两级。 */
+function installRootFromExe(exe) {
+  return path.dirname(path.dirname(path.join(path.dirname(exe), 'resources', 'app.asar')));
+}
+
+/**
+ * 禁区（安装目录）：OWNSHIELD_ASAR → OWNSHIELD_EXE → 运行中进程 → 常见安装位置，逐级推导，
+ * 不写死盘符。探测到的位置与全部常见位置一起列入——宁可多禁，不可漏禁。
+ * 惰性求值：只在真正做安全校验时才算，避免 import 即起一次进程枚举（看门狗每分钟要跑）。
+ */
+let forbiddenRootsCache = null;
+function forbiddenRoots() {
+  if (forbiddenRootsCache) return forbiddenRootsCache;
+  const roots = new Set();
+  const asarOverride = String(process.env.OWNSHIELD_ASAR || '').trim();
+  if (asarOverride !== '') roots.add(path.dirname(path.dirname(path.resolve(asarOverride))));
+  let exe = { path: '', exists: false, candidates: [] };
+  try {
+    exe = resolveInstalledExe();
+  } catch {
+    // 探测失败不阻塞：退回只按 profile 与白名单两层校验，不拿猜测路径充数。
+  }
+  if (exe.exists && exe.path !== '') roots.add(installRootFromExe(exe.path));
+  for (const candidate of exe.candidates || []) roots.add(installRootFromExe(candidate));
+  forbiddenRootsCache = [...roots].filter((root) => root !== '' && root !== path.parse(root).root);
+  return forbiddenRootsCache;
+}
+
+/** 禁区在错误消息里的展示形式，避免空列表时打出 undefined。 */
+function forbiddenLabel() {
+  const roots = forbiddenRoots();
+  return roots.length > 0 ? roots.join('、') : '（未能探测到安装根）';
+}
+
+/**
+ * state 允许列表：默认只允许本模块所在根（开发时即工作区，随包分发时即包根）。
+ * 生产由调用方（watch.mjs）把状态目录写进 OWNSHIELD_STATE_ALLOW 显式加白；
+ * 默认拒绝 `~/.dsh` 是故意的——清创工具不该有写真实 profile 的可能。
+ * 安装目录与真实 profile 不受此列表影响，永远拒绝。
+ */
 export const ALLOWED_STATE_ROOTS = [WORKSPACE_ROOT];
 
 /** 默认 state 根：工作区内，不越出 workspace（本阶段硬规矩）。 */
@@ -96,9 +122,9 @@ export function stateAllowList() {
 export function assertStateRoot(dir) {
   if (!dir) throw new Error('[ownshield] state 根为空');
   const abs = normalizeDir(dir);
-  for (const forbidden of FORBIDDEN_ROOTS) {
+  for (const forbidden of forbiddenRoots()) {
     if (abs.toLowerCase() === forbidden.toLowerCase() || abs.toLowerCase().startsWith(forbidden.toLowerCase() + path.sep)) {
-      throw new Error(`[ownshield] state 根落在安装目录: ${abs}（禁区：不改 ${FORBIDDEN_ROOTS[0]}）`);
+      throw new Error(`[ownshield] state 根落在安装目录: ${abs}（禁区：不改 ${forbiddenLabel()}）`);
     }
   }
   if (abs.toLowerCase() === REAL_PROFILES.toLowerCase() || abs.toLowerCase().startsWith(REAL_PROFILES.toLowerCase() + path.sep)) {
@@ -214,9 +240,9 @@ function fileExists(p) {
 
 export function assertSafePatch(patchPath, { allowRealProfile = false } = {}) {
   const abs = path.resolve(patchPath);
-  for (const root of FORBIDDEN_ROOTS) {
+  for (const root of forbiddenRoots()) {
     if (abs.toLowerCase().startsWith(root.toLowerCase() + path.sep)) {
-      throw new Error(`拒绝写安装目录内的文件: ${abs}（禁区：不改 ${FORBIDDEN_ROOTS[0]}）`);
+      throw new Error(`拒绝写安装目录内的文件: ${abs}（禁区：不改 ${forbiddenLabel()}）`);
     }
   }
   if (!allowRealProfile && abs.toLowerCase().startsWith(REAL_PROFILES.toLowerCase() + path.sep)) {
@@ -684,7 +710,7 @@ export function quarantinePackage({ dir, name, root = resolveQuarantineRoot(), t
   const abs = path.resolve(dir);
   if (!fs.existsSync(abs)) throw new Error(`插件目录不存在: ${abs}`);
   const lower = abs.toLowerCase();
-  for (const rootDir of FORBIDDEN_ROOTS) {
+  for (const rootDir of forbiddenRoots()) {
     if (lower.startsWith(rootDir.toLowerCase() + path.sep)) throw new Error(`拒绝移动安装目录内的包: ${abs}`);
   }
   const qid = dirNameOf(ts);

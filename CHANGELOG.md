@@ -23,6 +23,15 @@
   profile 上，重启后唤醒的会话会以**无预设**挂载，工具从 94 个掉到 35 个，shell / 文件 / 记忆
   全部消失（2026-11-19 实测）。超时仍照常投递并写日志，不阻断。
 - 对应新增测试：`test/smoke.mjs` 的 `awaitPresetsReady waits for a late preset registry`。
+- **清创（debride）的安装目录禁区写死了开发机路径**：安装根原先由一个硬编码的可执行文件路径推导，
+  在别人的机器上会推出一个不存在的目录，禁区保护因此落空（等于没护住真正的安装目录）。
+  现改为 `OWNSHIELD_ASAR` → `OWNSHIELD_EXE` → 运行中进程 → 常见安装位置逐级探测
+  （复用 `arm.mjs` 的 `resolveInstalledExe`），**探测到的位置与全部常见位置一起列入禁区**，
+  宁可多禁不漏禁；且做成惰性求值，不拖慢每分钟运行的看门狗。
+- **清创在插件运行期会被自己的 state 白名单拦住**：`watch.mjs` 传给清创的 root 是
+  `<状态目录>/quarantine`（生产即 `~/.dsh/ownshield/quarantine`），而 `debride` 的 state 白名单
+  默认只认本模块所在根。现由 `watch.mjs` 在调用前把该目录写进 `OWNSHIELD_STATE_ALLOW` 显式加白，
+  与设计约定一致；`debride` 默认拒绝写 `~/.dsh` 的边界保持不变（隔离、回滚、病历相关 23 项测试仍全绿）。
 
 **新增**
 
