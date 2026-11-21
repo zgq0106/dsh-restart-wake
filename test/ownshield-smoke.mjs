@@ -623,12 +623,12 @@ try {
     assert.equal(defaults.watchTaskName, 'ownshield-watch')
 
     const override = resolveOwnshieldConfig('C:\\pkg', {
-      scriptsDir: 'E:\\HarnessWorkRoom\\tools\\ownshield',
+      scriptsDir: 'C:\\pkg\\ownshield-scripts',
       promptEnabled: false,
       watchTaskName: 'custom-watch',
     })
-    assert.equal(override.scriptsDir, 'E:\\HarnessWorkRoom\\tools\\ownshield')
-    assert.equal(override.armScriptPath, 'E:\\HarnessWorkRoom\\tools\\ownshield\\arm.mjs')
+    assert.equal(override.scriptsDir, 'C:\\pkg\\ownshield-scripts')
+    assert.equal(override.armScriptPath, 'C:\\pkg\\ownshield-scripts\\arm.mjs')
     assert.equal(override.promptEnabled, false)
     assert.equal(override.watchTaskName, 'custom-watch')
   })

@@ -5,12 +5,12 @@
 ## 0. 发布前自查
 
 ```powershell
-cd E:\HarnessWorkRoom\dsh-restart-wake
+cd <repo>\dsh-restart-wake
 node --check index.js
 npm test                            # 应为 5 套全绿：28 / 24 / 28 / 13 / 7
 node scripts/ownshield/watch.test.mjs        # 38 passed, 0 failed
 node scripts/ownshield/cookie-guard.test.mjs # 7 passed, 0 failed
-npm pack --dry-run --json --cache E:\HarnessWorkRoom\tmp\npm-cache
+npm pack --dry-run --json --cache <tmp>\npm-cache
 ```
 
 `npm pack` 应列出 **46 个文件 / 约 627 KB**，包含 `index.js`、`lib/`（19 个）、`scripts/`（恢复链 7 个 + 重启 4 个）、`test/`（5 个）、`docs/`、`locale/`、`icon.svg`；**不得包含** `node_modules`、`tools/`、`scripts/ownshield/vendor/`、日志或 `tmp/`。
@@ -18,7 +18,7 @@ npm pack --dry-run --json --cache E:\HarnessWorkRoom\tmp\npm-cache
 ### 2.0.0 额外的发布前核对
 
 - [ ] `scripts/ownshield/` 的 7 个文件与开发目录 `tools/ownshield/` 同名文件 **sha256 逐个一致**
-- [ ] 包内**没有任何** `E:\HarnessWorkRoom` 字样的绝对路径（含注释与示例）
+- [ ] 包内**没有任何**本机绝对路径（形如 `E:\...` 的盘符路径，含注释与示例）
 - [ ] `package.json` 的 `version` 与 `CHANGELOG.md` 顶部段落一致
 - [ ] `README.md` 首屏仍有「升级须先卸两个旧包」的警示块
 
@@ -48,7 +48,7 @@ winget install --id Git.Git -e --source winget
 装完**关掉终端再开新的**，然后：
 
 ```powershell
-cd E:\HarnessWorkRoom\dsh-restart-wake
+cd <repo>\dsh-restart-wake
 git init -b main
 git add .
 git commit -m "feat: 2.0.0 — merge core self-healing into the restart plugin"
@@ -126,4 +126,4 @@ dsh plugin --profile desktop add github:zgq0106/dsh-restart-wake
 - [ ] 全新 profile（或另一台机器）实测安装 + 重启后 11 个工具可见
 - [ ] 已有 `dsh-ownshield` 的 profile 按升级须知操作后无重复工具告警
 - [ ] README 里没有本机私有路径、内网地址、凭据
-- [ ] `scripts/ownshield/` 里没有指向 `E:\HarnessWorkRoom` 的绝对路径
+- [ ] `scripts/ownshield/` 里没有指向开发工作区的绝对路径
