@@ -1,40 +1,51 @@
 # dsh-restart-wake
 
-Restart DeepSeek Harness **safely**, and wake sessions back up **automatically** afterwards.
+**Restart DeepSeek Harness safely, come back to the same conversation afterwards, and keep a rollback net while you edit the core.**
 
-A Host plugin for DeepSeek Harness: six Agent tools, a startup wake dispatcher, and parameterized restart scripts. An agent can schedule its own restart, survive it, and continue working — no human babysitting. It also cleans up the cookie pile-up that crashes Harness after roughly 70 launches.
+One package, eleven Agent tools, one set of startup hooks: restart & wake, core probes, snapshots with a watchdog, and failure re-injection.
 
 - Package: `dsh-restart-wake`
-- Platform: **restart and cookie cleanup are Windows-only**; wake, registry and status work everywhere
-- Dependencies: none
-- DSH version: requires **≥ `0.2.2-alpha.2`**; tested on `0.2.2-rc.2` (see the compatibility table below)
+- Version: **2.0.0**
+- Platform: **restart, cookie cleanup and the self-healing chain are Windows-only**; wake-up, registration and status queries are cross-platform
+- Dependencies: none (Node built-ins only)
+- DSH: requires **≥ `0.2.2-alpha.2`**; tested on `0.2.2-rc.2`
 
-## DSH compatibility
-
-The protocol prompt injects Schedule-tool guidance. DSH `0.2.2-alpha.2` made `rrule` and `target` required on `schedule_create` and replaced `schedule_update` / `schedule_delete` with `schedule_edit`. Keep the versions aligned, or the prompt will point at tools that no longer exist:
-
-| Plugin | Supported DSH | Notes |
-|---|---|---|
-| **v0.1.6** | **≥ `0.2.2-alpha.2`** | Prompts use `schedule_edit` and `rrule`; `engines.dsh` declares it, so older releases are refused at install |
-| v0.1.0 – v0.1.5 | `< 0.2.2-alpha.2` | Prompts use `schedule_delete` and `after_seconds`, both removed in newer DSH |
+> ## ⚠️ Upgrading from 0.1.x: uninstall the two old packages first
+>
+> 2.0.0 merges the former **`dsh-ownshield`** (probes, snapshots, arming) and **`dsh-ownshield-inject`** (failure re-injection, probe gate, request watch).
+>
+> Steps: ① remove `dsh-ownshield` and `dsh-ownshield-inject` from the profile's `dsh.profile.bundles`; ② drop their two `dependencies` entries; ③ install or update this package; ④ restart Harness.
+>
+> **Installing without uninstalling registers each `ownshield_*` tool twice**, which produces duplicate-identifier errors and can fail the whole tool group. Tool names and behaviour are unchanged in 2.0 — only the provider changed.
 
 ---
 
-## The problem
+## What it solves
 
-After changing `src/`, `package.json`, `cordis.patch.yml` or an installed plugin, the Host must restart. But "let Harness restart itself" hits three hard walls:
+### 1. Restart & wake
 
-| Wall | Symptom | Cause |
+Editing `src/`, `package.json`, `cordis.patch.yml` or an installed plugin requires a Host restart. Making Harness restart itself runs into three physical obstacles:
+
+| Obstacle | Symptom | Cause |
 |---|---|---|
-| Starting the restart script from inside Harness | The log stops at `killing` and the app never returns | Harness puts its children in a Windows Job Object, so the script dies with it |
-| Relaunching immediately | The new instance exits right away | Electron's single-instance lock is still held by the dying process |
-| Nobody tells the session | The session sits idle forever | The script runs outside the process and cannot notify anything at startup time |
+| Launching the restarter from inside Harness | Log stops at `killing` and never returns | Harness puts child processes in a Windows Job Object; killing Harness kills the script |
+| Relaunching immediately after the kill | The new instance quits on start | The Electron single-instance lock is still held; the new instance hands its arguments to the dying one |
+| Nobody notifies the session afterwards | The conversation just sits there | The script runs outside the process and cannot reach a conversation at startup |
 
-How this plugin handles it:
+This package: runs the restart through a **Task Scheduler job** outside the process tree → **kills the browser main process first, then its children**, and waits for the single-instance lock → writes the "what to do when you wake up" entry to a file before restarting, and a **startup waker** delivers it through `sessionController.prompt` (which resumes cold sessions).
 
-1. A **one-shot Task Scheduler task** runs the restart outside the Job Object.
-2. It kills the **browser (Electron main) process first**, then its children, and waits for the single-instance lock — no crash dialog, no Windows error chime.
-3. Before the kill, the agent's "what to do when I wake up" note is written to a registry file. A **startup wake loop** delivers it through `sessionController.prompt`, which resumes cold sessions.
+### 2. Core self-healing
+
+Some failures never write a crash log: Harness starts, the UI works, but creating a session throws `Duplicate tool group identifier: outbound`, or new sessions fail with `agent-preset/invalid` and old ones with `resume failed`. These surface only as RemoteErrors on the client. Nobody watching "process alive / no crash log" will ever see them.
+
+| Face | Tools | What it does |
+|---|---|---|
+| Probe (always available) | `ownshield_probe` | Detect only: create a temp session, send `probe`, resume a fixed session, compare tool/service inventories, read cookie and credential warnings |
+| Recovery chain (armed on demand) | `ownshield_snapshot` / `ownshield_arm` / `ownshield_disarm` / `ownshield_status` | Snapshot and arm before touching `src/`, asar or the kernel; on breakage the watchdog rolls back → restarts → verifies → reports, then **disarms itself** |
+
+The chain is not resident: only a watchdog with `arm.json` present holds rollback power.
+
+A third, quieter capability: **failure re-injection**. Recovery reports written when the watchdog gives up are delivered back into the affected session on the next startup (and every 5 minutes while running); a failing model request (`401` / `429`) injects its failure scene into the current conversation so the model can see it and tell the user.
 
 ---
 
@@ -44,204 +55,104 @@ How this plugin handles it:
 dsh plugin --profile desktop add github:zgq0106/dsh-restart-wake
 ```
 
-Then **restart Harness once** (Host plugin modules are cached by package name; disabling/enabling does not reload them).
+Restart Harness once afterwards — Host plugin modules are cached by package name.
 
-If pnpm rejects the `github:` prefix:
+### Post-install check
 
-```powershell
-dsh plugin --profile desktop add "git+https://github.com/zgq0106/dsh-restart-wake.git"
-```
-
-### First check
-
-Ask the agent to call `restart_status`. It reports the detected executable, script availability, registry directory, restart mutex, running sessions, and the log tail.
-
-If `exePath` is missing, set it explicitly in the plugin config (see *Configuration*).
+Ask an Agent to call `restart_status` and `ownshield_status`. The first reports the resolved executable, restart script and task entry, registry directory, restart lock, running sessions and the log tail. The second reports armed state, whether the scheduled task exists, the snapshot store path, the last recovery verdict, cookie-guard backoff, and whether `needs-human.json` exists.
 
 ---
 
-## Tools
+## Eleven tools
 
-| Tool | Purpose |
-|---|---|
-| `restart_now` | Register the wake-up → check mutex → check blocked sessions → schedule the restart in N seconds |
-| `wake_register` | Register a wake-up only; wait for another session to trigger the restart |
-| `wake_list` | Pending entries, recent archives, mutex state |
-| `wake_cancel` | Remove this session's wake-up |
-| `restart_status` | Self-check and post-restart verification |
-| `cookie_status` | `dsh-auth-*` cookie count, estimated header size, cleanup threshold |
+Restart & wake (6): `restart_now`, `wake_register`, `wake_list`, `wake_cancel`, `restart_status`, `cookie_status`.
 
-The caller does not pass a session id: it is read from the tool execution context (`exec.agent.id`).
+Self-healing (5): `ownshield_probe`, `ownshield_snapshot`, `ownshield_arm`, `ownshield_disarm`, `ownshield_status`.
 
-### Built-in protocol prompt (independent of the agent's own memory)
+Callers never pass a session id: tools read it from the execution context.
 
-The plugin registers a section through `ctx.systemPrompt.section()` on the Host root scope, so **every Agent in this profile sees it on every step**: when a restart is warranted, that `restart_now` must be the last action of the turn, and that it should verify with `restart_status` afterwards. An agent with no notes of its own — or a different preset — still knows what to do.
+### Built-in protocol prompt
 
-The text is fixed at roughly 300 characters. Set `promptEnabled: false` when your preset already carries the same rules.
+Registered through `ctx.systemPrompt.section()` on the Host root scope, so every Agent composed in this profile sees it on every step. Two sections — restart rules and self-healing rules — switchable with `restartPromptEnabled` / `ownshieldPromptEnabled`; the legacy `promptEnabled: false` disables both.
 
-### Typical flow
+---
+
+## Requirements (read before arming)
+
+| Item | Requirement | Notes |
+|---|---|---|
+| Platform | **Windows only** | Uses `schtasks`, `wscript` (hidden launcher) and PowerShell |
+| Node | **Node.js 22+**, discoverable | Probe order: `nodePath` → `OWNSHIELD_NODE` → `DSH_NODE` → `NODE_EXE` → `where node` → common install locations. If nothing runs, arming fails with `ok:false` and an explicit problem — never a task that can never run |
+| Privileges | **No admin needed** | Arming creates a per-user scheduled task (no `/RU`) |
+| Disk | ~**200 MB per snapshot** (deduplicated) | Store defaults to `~/.dsh/ownshield/snapshots`; below 512 MB warns, below 2 GB the watchdog treats observability as broken and hands over to a human |
+| State | `~/.dsh/ownshield` (`OWNSHIELD_DIR`) | `arm.json`, `boot.json`, `recovery.log`, generated `watch-silent.vbs`, `needs-human.json` |
+
+Arming writes the runtime-probed node path and the absolute `watch.mjs` path into `<stateDir>\watch-silent.vbs` and points the scheduled task at that copy. Moving to another machine needs no file edits.
+
+### Arm / disarm / uninstall
 
 ```text
-1. restart_status        → exeExists / scriptExists are true, no blocked sessions
-2. restart_now({ prompt: "Read the restart log, confirm RESULT: OK, continue the task" })
-3. reply "restarting in ~12s", end the turn
-4. the plugin wakes this session after the restart
-5. restart_status        → lock released, entry consumed, log ends with RESULT: OK
+ownshield_snapshot ──snapshot──▶ ownshield_arm ──arm──▶ edit the core ──breakage──▶ rollback/restart/verify/report
 ```
 
----
+Disarm happens automatically after a successful recovery; manually use `ownshield_disarm`. Uninstall:
 
-## What happens during a restart
-
-```
-restart_now
-  ├─ write wake-pending-<sessionId>.json
-  ├─ write restart-config.json
-  ├─ write restart.lock
-  └─ schtasks /Create + /Run          (one-shot task, fires in 12s)
-        ↓
-      restart-dsh.ps1 (outside Harness)
-        ├─ graceful close (Harness only hides to tray)
-        ├─ kill browser process first, then children
-        ├─ wait for every process to exit
-        ├─ purge dsh-auth-* cookies above the threshold (prevents 431)
-        ├─ cookie snapshot (read-only)
-        ├─ wait for the single-instance lock
-        ├─ launch → wait → verify, up to 3 attempts
-        ├─ log RESULT: OK / FAILED
-        └─ delete the one-shot task
-        ↓
-      new Host starts
-        ├─ clear restart.lock
-        ├─ scan wake-pending-*.json
-        └─ sessionController.prompt(...) → sessions resume
+```powershell
+schtasks /Delete /TN ownshield-watch /F
+schtasks /Delete /TN DshRestartWake /F
+Remove-Item -Recurse -Force "$env:USERPROFILE\.dsh\ownshield"
+Remove-Item -Recurse -Force "$env:USERPROFILE\.dsh\restart-wake"
 ```
 
-With no entries the wake loop stays silent and only logs `no-pending`.
+Disarming does **not** delete the scheduled task: while unarmed it still runs a cookie guard once a minute (read-only, no rollback power).
 
 ---
 
 ## Configuration
 
-Defaults work out of the box: the executable is detected from the running process, the registry lives in `~/.dsh/restart-wake`, and the scripts ship with the package.
+Defaults work out of the box: the executable is detected from the running process, the wake registry lives in `~/.dsh/restart-wake`, self-healing state in `~/.dsh/ownshield`, scripts ship inside the package. Override the Loader row's `config` in the profile's `cordis.patch.yml`; missing fields fall back to defaults.
 
-To change anything, override the row in the profile's `cordis.patch.yml` (`config` is replaced wholesale, but missing fields fall back to defaults, so list only what you change):
-
-```yaml
-- id: restart-wake
-  name: dsh-restart-wake
-  config:
-    pendingDir: 'D:\dsh-wake'
-    delaySeconds: 15
-```
-
-| Key | Default | Meaning |
-|---|---|---|
-| `pendingDir` | `~/.dsh/restart-wake` | Registry, mutex, log and script payload |
-| `logPath` | `<pendingDir>/wake.log` | Wake and restart log |
-| `lockPath` | `<pendingDir>/restart.lock` | Restart mutex |
-| `exePath` | auto-detected | Harness executable; required when detection fails |
-| `processName` | derived | Process name without `.exe` |
-| `scriptPath` | bundled | `scripts/restart-dsh.ps1` |
-| `commandPath` | bundled | `scripts/run-restart.cmd` |
-| `taskName` | `DshRestartWake` | One-shot task name; change it for multiple installs |
-| `delaySeconds` | `12` | Delay between scheduling and the kill |
-| `launchWaitSeconds` | `8` | Wait after each launch attempt |
-| `maxLaunchAttempts` | `3` | Launch attempts |
-| `graceSeconds` | `8` | Graceful-close wait |
-| `killTimeoutSeconds` | `20` | Wait for processes to exit after the force kill |
-| `singleInstanceWaitSeconds` | `3` | Wait for the Electron lock |
-| `lockStaleMs` | `600000` | A lock older than this is abandoned |
-| `maxAgeMs` | `86400000` | Entries older than this are not delivered |
-| `maxAttempts` | `3` | Delivery attempts per entry |
-| `retryDelayMs` | `15000` | Delay between attempts |
-| `startupDelayMs` | `3000` | Delay before the first scan |
-| `cookieDbPath` | auto-detected Desktop store | Chromium cookie database |
-| `cookieProbePath` | bundled | Cookie snapshot script |
-| `cookieCleanupPath` | bundled | Cookie cleanup script |
-| `cookieThreshold` | `50` | Purge `dsh-auth-*` in the restart window at this count (~11 KB header) |
-| `promptEnabled` | `true` | Inject the built-in protocol prompt into every Agent |
-| `keepArchives` | `10` | Failure/expiry/duplicate archives to keep; older ones are pruned at startup |
-| `maxLogBytes` | `262144` | Rotate `wake.log` to `wake.log.1` past this size (at most two log files) |
-| `crashLogDir` | empty | Optional crash-log directory for the crash-report check |
-
-> `pendingDir` length affects the Task Scheduler command line (260-character limit). `restart_now` refuses to schedule with a clear message when it would overflow.
-
----
-
-## The 431 startup crash and cookie cleanup
-
-Every launch the Desktop Host listens on a random port and mints one `dsh-auth-<authority-hash>` cookie. New port, new name; Chromium only accumulates. Around 70 entries the Cookie request header passes Node's 16 KB limit, the Host answers `431 Request Header Fields Too Large`, the shell checks only `response.ok`, and startup aborts with "Web authentication failed".
-
-That file is held exclusively while Harness runs, so the only readable window is between the browser process dying and the next instance starting — exactly where the restart script runs. On every restart the plugin:
-
-1. `scripts/cookie-cleanup.mjs` — counts `dsh-auth-*` and, once the count reaches `cookieThreshold` (default 50, ~11 KB), deletes only that family; other cookies and account credentials are untouched;
-2. `scripts/cookie-probe.mjs` — records the count and remaining lifetime after cleanup.
-
-Log lines look like:
-
-```text
-cookie cleanup: authCookies=52 others=38 headerKB=11 threshold=50 action=purged removed=52
-cookie snapshot: authCookies=0 ttl=[]
-```
-
-Manual cleanup (when Harness no longer starts):
-
-```powershell
-node <package>\scripts\cookie-cleanup.mjs "$env:APPDATA\@deepseek-ai\dsh-desktop\Network\Cookies" --dry-run
-node <package>\scripts\cookie-cleanup.mjs "$env:APPDATA\@deepseek-ai\dsh-desktop\Network\Cookies"
-```
-
-Manual cleanup requires a fully exited Harness. `cookie_status` can only report while the file is readable; failing to read it during a running Host is expected.
-
-A second mitigation lives in the profile config: lower `client-connection.cookieMaxAgeDays` from 30 to 1 to shrink the accumulation window to a single day. The plugin does not change that config for you.
+Note the two state directories are distinct on purpose: `pendingDir` (wake registry) and `injectDir` (re-injection). The full field tables — restart, self-healing, re-injection — are in the Chinese README, which is the reference document.
 
 ---
 
 ## Safety boundaries
 
-- Only text is delivered, never a command.
-- At most 3 delivery attempts per entry; failures are archived, never retried forever.
-- **A successful delivery leaves no file** (one log line only); failure/expiry/duplicate archives keep only the newest 10, pruned at startup.
-- `wake.log` rotates to `wake.log.1` past 256 KB, so the directory holds at most two log files.
-- Entries expire after 24 hours.
-- A mutex allows one restart at a time.
-- By default it refuses to restart while another unregistered session is running (`force: true` overrides).
-- The executable, the script and the task entry are validated before anything is killed.
+- Delivers text only, never executes commands;
+- At most 3 delivery attempts per entry, then archived — **never an unbounded retry loop**;
+- A successful delivery leaves no file behind;
+- Locks guarantee one restart at a time;
+- Refuses to restart while other unregistered sessions are running (`force: true` overrides);
+- Validates the executable, script and task entry before acting — one missing and it does nothing;
+- Probe failures **never** trigger rollback or restart (deliberate, to avoid a self-exciting repair loop);
+- The watchdog holds rollback power only while armed, disarms after recovery, and stops after three consecutive failures;
+- Rollback touches only the installed `app.asar` (optionally the profile layer), never `~/.dsh` memory or sessions;
 - No credentials, no uploads, no telemetry.
 
 ---
 
-## Limits
-
-- **Restart**: Windows only (`schtasks` + PowerShell). On other platforms `restart_now` fails without side effects.
-- **Cookie cleanup**: Windows only (Desktop default path); manual cleanup needs a fully exited Harness.
-- **Wake**: plain Node, cross-platform.
-- A restart interrupts the current turn; unsaved input is lost.
-- If another "deliver on startup" plugin shares the same `pendingDir`, entries may be delivered twice — give each plugin its own directory.
-
----
-
-## Troubleshooting
-
-| Symptom | Check |
-|---|---|
-| `restart_now` returns `blocked` | Another session is running and unregistered; wait, or pass `force: true` |
-| `restart_now` returns `busy` | Another restart was scheduled within the last 10 minutes; do not add a second one |
-| `schtasks` says "path not found" | Run `schtasks /Query /FO LIST` to tell "task does not exist" from an actual permission problem |
-| Log stops at `killing` | The script was killed with Harness — run it through Task Scheduler, not `Start-Process` inside Harness |
-| Log stops at `attempt N : running processes = 0` | Launch failed; start Harness manually and read the error before `RESULT: FAILED` |
-| Windows error chime after a restart | Wrong kill order: kill the browser process first, then its children |
-| No prompt after waking | Check `wake.log`: `delivered` = success; `controller-unavailable` / `expired` explain the rest |
-
----
-
-## Development
+## Tests
 
 ```powershell
-node --check index.js
-node test/smoke.mjs        # offline; no Harness or Task Scheduler needed
+node test/smoke.mjs
+node test/ownshield-smoke.mjs
+node test/inject/smoke.mjs
+node test/inject/probe-gate.test.mjs
+node test/inject/request-watch.test.mjs
+node scripts/ownshield/watch.test.mjs
+node scripts/ownshield/cookie-guard.test.mjs
 ```
+
+All offline: fake Cordis contexts and stub services drive the real `apply()` and `execute()`. Do not run these with `node --test` — the extra spawned layer hits EPERM under a confined sandbox; `node <file>` is authoritative.
+
+## Compatibility
+
+| Item | Value |
+|---|---|
+| Tested DSH | `0.2.2-rc.2` (Windows, Node 24.21.0) |
+| Node | `^22.19.0 \|\| >=24.0.0` |
+| Dependencies | Node built-ins only |
+| Build | none |
 
 ## License
 

@@ -1,12 +1,20 @@
-# dsh-restart-wake
+# dsh-restart-wake 2.0
 #
-# One Host row. It does two things on every Host startup:
-#   1. clears a stale restart mutex left by a previous restart, and
+# One Host row. On every Host startup it does four things:
+#   1. clears a stale restart mutex left by a previous restart;
 #   2. delivers every registered wake-up (wake-pending-*.json) through
-#      sessionController.prompt, which resumes cold sessions automatically.
+#      sessionController.prompt, which resumes cold sessions automatically;
+#   3. delivers pending self-healing reports back into the affected session
+#      (~/.dsh/ownshield/inject-pending*.json), then re-scans every 5 minutes;
+#   4. runs the probe gate (rate-limited to once per 6 h) and the request watch
+#      (a failing model request injects its failure scene into the conversation).
 #
-# It also registers five Agent tools (restart_now / wake_register / wake_list /
-# wake_cancel / restart_status). No Client half, no UI.
+# It registers eleven Agent tools: restart_now / wake_register / wake_list /
+# wake_cancel / restart_status / cookie_status, plus ownshield_probe /
+# ownshield_snapshot / ownshield_arm / ownshield_disarm / ownshield_status.
+#
+# No Client half, no UI, and no resident daemon: the watchdog holds rollback
+# power only while arm.json exists, and disarms itself after a recovery.
 #
 # Every config field is optional; omit this `config` block to use the defaults.
 # `exePath` is detected from the running Electron executable when omitted, so a

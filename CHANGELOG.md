@@ -1,5 +1,46 @@
 # Changelog
 
+## 2.0.0 (2026-11-21)
+
+三个包并成一个：本包现在同时提供**重启/唤醒**、**本体自愈**与**故障回注**。
+一条安装命令、一个版本号、11 个 Agent 工具、1 段注入提示。
+
+**破坏性变更（升级前必读）**
+
+- 本包**取代** `dsh-ownshield`（0.1.0）与 `dsh-ownshield-inject`（0.1.0）。
+  升级必须**先卸掉这两个旧包**，并清掉 profile `cordis.patch.yml` 里它们各自的 `insert` 行；
+  否则同一个工具会被注册两次（重名注册的后果取决于 DSH 的注册实现），自愈提示也会出现两遍。
+- 配置字段改名（仅回注侧，语义冲突）：`pendingDir` → `injectDir`，`logPath` → `injectLogPath`。
+  状态目录不变，仍是 `~/.dsh/ownshield`，老用户历史文件原地可读。
+- 提示开关拆成两个：`restartPromptEnabled` / `ownshieldPromptEnabled`（都缺省 `true`）。
+  旧字段 `promptEnabled: false` 仍然有效，等价于两者都关。
+- 自愈判定、回滚、快照闸、cookie 守卫等运行逻辑**一行未改**；工具名、参数与描述**一字未改**。
+
+**修复（0.1.6 之后一直未发布，随 2.0 首次发出）**
+
+- **冷唤醒时预设注册表竞态**：`startWakeLoop` 投递前现在会等 `agentPresets.resolve()` 就绪
+  （新增 `awaitPresetsReady()` 与 `presetsReadyTimeoutMs`，默认 20 s）。原先在 19-bundle 的
+  profile 上，重启后唤醒的会话会以**无预设**挂载，工具从 94 个掉到 35 个，shell / 文件 / 记忆
+  全部消失（2026-11-19 实测）。超时仍照常投递并写日志，不阻断。
+- 对应新增测试：`test/smoke.mjs` 的 `awaitPresetsReady waits for a late preset registry`。
+
+**新增**
+
+- `lib/config-ownshield.js` / `lib/config-inject.js` / `lib/tools-ownshield.js` /
+  `lib/pending-inject.js`：分别搬自 `dsh-ownshield` 与 `dsh-ownshield-inject`，只改导入与导出名。
+- `scripts/ownshield/`：恢复链的**运行期闭包**随包发布（`arm.mjs` / `asar.mjs` / `debride.mjs` /
+  `snapshot.mjs` / `watch.mjs`），外加两个可自验测试 `watch.test.mjs`（38 项）与
+  `cookie-guard.test.mjs`（7 项）。验收、演练、取证类脚本（`acceptance.mjs`、`drill-a4.mjs`、
+  `probe-matrix.mjs`、`secure.mjs`、`plugin-check.mjs`、各 `*.test.mjs` 等 30 个）留在开发目录，
+  不进包——它们引用本机工作区路径与源包目录，对使用者无意义。
+- `test/ownshield-smoke.mjs`、`test/inject/*.test.mjs` 随之入包；`npm test` 依次跑四套。
+- `scripts/ownshield/vendor/` **不进包**：`doctor.mjs` 只被开发工具 `plugin-check.mjs` 使用，
+  而该工具本身不留；同目录的 `snapshot-engine.mjs` / `redact-vault.mjs` / `zip-export.mjs`
+  三个实验模块经核查**没有任何调用者**，同样留库。运行期不需要 vendor 下任何文件。
+- `cookie-guard.test.mjs` 的 auth-gate 引用改为按布局解析：包内走 `../../lib/auth-gate.js`，
+  开发目录回落 `../../dsh-ownshield/lib/auth-gate.js`。此前写死开发路径，用户装包后跑包内测试会红。
+- `README.md` / `README.en.md` / `locale/*.json` 合并重写：首屏声明本包取代两个旧包、升级须先卸旧包。
+
 ## 0.1.6 (2026-11-12)
 
 适配 DSH 0.2.2-rc.2 的 Schedule 工具改名。

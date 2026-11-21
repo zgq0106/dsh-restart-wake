@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "重启唤醒",
-    "description": "让 Agent 安全重启 Harness，并在重启完成后自动唤醒原会话继续工作。"
+    "title": "重启唤醒 + 本体自愈",
+    "description": "让 Agent 安全重启 Harness 并在重启后自动唤醒原会话；改内核前建快照并武装看门狗，崩了自动回滚、重启、校验；故障现场回注原会话。"
   }
 }

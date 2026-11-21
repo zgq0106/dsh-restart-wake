@@ -31,7 +31,7 @@ import {
 } from '../lib/restart.js'
 import { inspectCookieStore } from '../lib/cookie.js'
 import { restartPromptText } from '../lib/prompt.js'
-import { WAKE_CLEANUP_NOTE } from '../lib/wake.js'
+import { WAKE_CLEANUP_NOTE, awaitPresetsReady } from '../lib/wake.js'
 import { createTools } from '../lib/tools.js'
 
 let passed = 0
@@ -309,6 +309,47 @@ try {
     assert.equal(value.available, false)
     assert.equal(value.threshold, 50)
     assert.equal(value.cleanupExists, false)
+  })
+
+  await testAsync('awaitPresetsReady waits for a late preset registry', async () => {
+    let ready = false
+    const resolved = []
+    const ctx = {
+      get: (name) =>
+        name === 'agentPresets' && ready
+          ? { resolve: async (id) => { resolved.push(id); return { id: 'butler' } } }
+          : undefined,
+    }
+    setTimeout(() => { ready = true }, 250)
+    const logs = []
+    const started = Date.now()
+    const ok = await awaitPresetsReady(ctx, { presetsReadyTimeoutMs: 3000 }, (m) => logs.push(m))
+    assert.equal(ok, true)
+    assert.ok(Date.now() - started >= 200, 'returned before the registry appeared')
+    assert.deepEqual(resolved, [undefined], 'resolve must probe the default preset once')
+    assert.equal(logs.length, 0, 'a ready registry logs nothing')
+  })
+
+  await testAsync('awaitPresetsReady times out with a log line instead of hanging', async () => {
+    const ctx = { get: () => undefined }
+    const logs = []
+    const ok = await awaitPresetsReady(ctx, { presetsReadyTimeoutMs: 300 }, (m) => logs.push(m))
+    assert.equal(ok, false)
+    assert.equal(logs.length, 1)
+    assert.ok(logs[0].startsWith('presets-not-ready'))
+  })
+
+  await testAsync('awaitPresetsReady reports a registry that rejects', async () => {
+    const ctx = {
+      get: (name) =>
+        name === 'agentPresets'
+          ? { resolve: async () => { throw new Error('agent-preset/not-found: drill-missing-preset') } }
+          : undefined,
+    }
+    const logs = []
+    const ok = await awaitPresetsReady(ctx, { presetsReadyTimeoutMs: 400 }, (m) => logs.push(m))
+    assert.equal(ok, false)
+    assert.ok(logs[0].includes('agent-preset/not-found'))
   })
 
   await testAsync('scheduleRestart rejects a missing executable before touching schtasks', async () => {

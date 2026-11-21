@@ -1,6 +1,6 @@
 {
   "meta": {
-    "title": "Restart & Wake",
-    "description": "Safely restart DeepSeek Harness and automatically wake sessions back up afterwards."
+    "title": "Restart, Wake & Self-Heal",
+    "description": "Restart Harness safely and wake the conversation afterwards; snapshot and arm a watchdog before touching the core, so a broken build is rolled back, restarted and verified automatically; inject the failure scene back into the affected session."
   }
 }
