@@ -333,7 +333,7 @@ export const DEFAULTS = {
  * 全是失败且 ≥3 条 = 纸条在报警（例如工具集装配坏了、每调必抛）。
  * 没流量时不下结论——空闲不等于坏了，那是静态检查的事。
  */
-export function readActivitySignal(paths, now = Date.now(), { windowMs = 10 * 60 * 1000, threshold = 3 } = {}) {
+export function readActivitySummary(paths, now = Date.now(), { windowMs = 10 * 60 * 1000, since = 0 } = {}) {
   let raw = null;
   try {
     raw = JSON.parse(fs.readFileSync(paths.activity, 'utf8').replace(/^\uFEFF/, ''));
@@ -342,18 +342,36 @@ export function readActivitySignal(paths, now = Date.now(), { windowMs = 10 * 60
   }
   const rows = (Array.isArray(raw?.recent) ? raw.recent : []).filter((row) => {
     const at = Date.parse(String(row?.at ?? ''));
-    return Number.isFinite(at) && now - at <= windowMs;
+    // since：只认这条时间之后的记录——恢复校验时用它把「重启前」的旧账排除掉。
+    return Number.isFinite(at) && at >= since && now - at <= windowMs;
   });
-  const failures = rows.filter((row) => row?.ok === false);
-  const successes = rows.filter((row) => row?.ok === true);
-  if (successes.length > 0) return null;
-  if (failures.length < threshold) return null;
-  const last = failures[failures.length - 1];
+  const successes = rows.filter((row) => row?.ok === true).length;
+  const failureRows = rows.filter((row) => row?.ok === false);
+  return {
+    successes,
+    failures: failureRows.length,
+    lastErrorText: String(failureRows[failureRows.length - 1]?.text ?? ''),
+    verdict: successes > 0 ? 'alive' : failureRows.length >= 3 ? 'failing' : 'idle',
+  };
+}
+
+/**
+ * 挂起态什么时候解除：模型重新出现成功操作（纸条转绿）。
+ * 抽成纯函数，测试不必造整个 runWatch 环境。
+ */
+export function shouldReleaseSuspended(state, summary) {
+  return Boolean(state?.suspended) && summary?.verdict === 'alive';
+}
+
+export function readActivitySignal(paths, now = Date.now(), { windowMs = 10 * 60 * 1000, threshold = 3, since = 0 } = {}) {
+  const summary = readActivitySummary(paths, now, { windowMs, since });
+  if (!summary || summary.verdict !== 'failing') return null;
+  if (summary.failures < threshold) return null;
   return {
     verdict: 'failing',
     successes: 0,
-    failures: failures.length,
-    detail: `最近 ${Math.round(windowMs / 60000)} 分钟内 ${failures.length} 次操作失败、0 次成功（最后一次: ${last?.text || 'unknown'}）`,
+    failures: summary.failures,
+    detail: `最近 ${Math.round(windowMs / 60000)} 分钟内 ${summary.failures} 次操作失败、0 次成功（最后一次: ${summary.lastErrorText || 'unknown'}）`,
   };
 }
 
@@ -1612,10 +1630,16 @@ function verifyAfterRestart({ paths, arm, bootStart, crashBaseline, hbSeenBefore
           continue;
         }
       }
+      // 模型可用（总验收线）：只认本次重启之后的真实操作记录。
+      // 重启后已有成功 = 模型确实能用；成串失败且零成功 = 起来了但跑不动，不能报成功。
+      const postBoot = readActivitySignal(paths, now, { since: bootStart - SKEW_MS });
+      if (postBoot && postBoot.verdict === 'failing') {
+        return { ok: false, reason: 'model-unusable', detail: postBoot.detail, checks };
+      }
       if (now - bootStart >= DEFAULTS.verifyQuietMs) {
         return {
           ok: true,
-          reason: hbSeenBefore ? 'process+crash+heartbeat' : 'process+crash',
+          reason: `${hbSeenBefore ? 'process+crash+heartbeat' : 'process+crash'}${postBoot ? '+model-usable' : '+model-unverified'}`,
           checks,
         };
       }
@@ -2529,13 +2553,36 @@ function runLocked({ opts, paths, arm, armId, now, t0 }) {
     }
   }
 
+  // 挂起态：不再自动修复，但继续观察。模型恢复工作（纸条出现成功）就自动停止看护。
+  if (state.suspended) {
+    const since = Date.parse(String(state.suspendedAt ?? '')) || 0;
+    const post = readActivitySummary(paths, now, { since });
+    if (shouldReleaseSuspended(state, post)) {
+      const dest = disarm(paths, 'recovered-after-suspend');
+      delete state.suspended;
+      delete state.suspendedAt;
+      state.lastResult = 'recovered';
+      writeJsonAtomic(paths.state, state);
+      appendLog(paths, { event: 'suspend-release', arm: arm.tag, result: 'recovered', disarm: dest });
+      base.decision = { ...decision, action: 'disarm', reason: '模型已恢复工作，自动停止看护' };
+      return { exitCode: EXIT.OK, output: { ...base, released: true } };
+    }
+    state.lastCheckAt = iso(now);
+    writeJsonAtomic(paths.state, state);
+    base.decision = { ...decision, action: 'suspended', reason: '已熔断挂起，等待模型恢复工作' };
+    return { exitCode: EXIT.NEEDS_HUMAN, output: { ...base, suspended: true } };
+  }
+
   // ---- 恢复 ----
   const level = nextLevel(arm, state);
   if (!level) {
     state.lastResult = 'needs-human';
     if (!opts.dryRun) {
       const payload = writeNeedsHuman(paths, arm, signals, state.attempts, failures);
-      const dest = disarm(paths, 'needs-human');
+      // P2：熔断改为挂起——保留看护，把现场留给还能工作的模型；纸条转绿后自动停止看护。
+      state.suspended = true;
+      state.suspendedAt = iso(now);
+      const dest = '';
       state.lastCheckAt = iso(now);
       writeJsonAtomic(paths.state, state);
       appendLog(paths, {
@@ -2563,11 +2610,14 @@ function runLocked({ opts, paths, arm, armId, now, t0 }) {
 
   if (failures >= arm.maxFailures) {
     const payload = writeNeedsHuman(paths, arm, signals, state.attempts, failures);
-    const dest = disarm(paths, 'needs-human');
+    // P2：不撤防、改挂起（同上）。
+    state.suspended = true;
+    state.suspendedAt = iso(now);
+    const dest = '';
     appendLog(paths, {
       event: 'recover',
       arm: arm.tag,
-      result: 'needs-human',
+      result: 'suspended',
       level: 'none',
       detail: payload.reason,
       disarm: dest,
@@ -2825,8 +2875,11 @@ function runLocked({ opts, paths, arm, armId, now, t0 }) {
   }
 
   const payload = writeNeedsHuman(paths, arm, signals, state.attempts, state.failures);
-  const dest = disarm(paths, 'needs-human');
-  state.lastResult = 'needs-human';
+  // P2：仍不撤防——挂起等待模型自己修。
+  state.suspended = true;
+  state.suspendedAt = iso(now);
+  const dest = '';
+  state.lastResult = 'suspended';
   writeJsonAtomic(paths.state, state);
   appendLog(paths, {
     event: 'recover',

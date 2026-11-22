@@ -2,6 +2,8 @@
 
 ## 未发布
 
+- **恢复校验看「模型能不能用」**（2026-11-22）：`verifyAfterRestart` 增加 `model-unusable` —— 只认**本次重启之后**的纸条记录（`activity.json`，用 `since` 排除旧账）：有成串失败且零成功则判失败，不再因为「进程在、没新 crash log」就报成功；无流量则记 `+model-unverified`，不阻塞。
+- **熔断改挂起**（2026-11-22）：连续失败到阈值后不再撤防，`needs-human.json` 照写、自动修复停手，但 `arm.json` 保留继续观察；纸条出现成功操作即自动停止看护（`suspend-release`）。依据：模型能继续工作时，现场该交给它自己修。
 - **`ownshield_probe` 默认静态化**（2026-11-22）：默认只跑工具 / 服务 / 心跳 / 凭据四项（零会话、零 token、用户完全无感）；`create-session` / `prompt-first-turn` / `resume-probe-session` 只在 `deep: true` 时执行。原有探针测试全部改传 `deep: true`，并新增「默认不建会话」断言。定时探针（probe-gate）直调因此也变轻量。
 - **纸条即探针：用真实工作痕迹判定「跑不动」**（2026-11-22）：新增 `lib/activity-watch.js`——订阅每个 agent 的 `session/event`（`tool/result`、`turn/end`、`assistant/message`）与 `agent/request-error`，把最近 50 条成功/失败落到 `~/.dsh/ownshield/activity.json`。看门狗新增硬信号 `activity-failed`：**窗口内 ≥3 次失败且 0 次成功**才报警；有一次成功就算能用，零流量不下结论（空闲不等于坏了）。
   这样做的好处：测的是用户真实在用的预设与工具集、零额外会话、零额外 token、用户完全无感；模型一出问题当场就有记录，不用等探针窗口。主动探针因此从「主检测」降为「手动/兜底」。

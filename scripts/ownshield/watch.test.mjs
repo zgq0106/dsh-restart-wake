@@ -23,6 +23,8 @@ import {
   nextLevel,
   levelTag,
   readActivitySignal,
+  readActivitySummary,
+  shouldReleaseSuspended,
   normalizeArm,
   normalizeBoot,
   normalizeState,
@@ -417,6 +419,34 @@ test('activity-failed：窗口内全是失败且 ≥3 条才报警；有成功�
   assert.equal(readActivitySignal(paths, now), null, '零星失败不下结论');
 
   assert.equal(readActivitySignal({ activity: path.join(dir, 'nope.json') }, now), null);
+});
+
+test('readActivitySummary：since 之前的旧账不计；shouldReleaseSuspended 只在纸条转绿时释放', () => {
+  const dir = tmpDir('summary');
+  const file = path.join(dir, 'activity.json');
+  const now = T0;
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      version: 1,
+      recent: [
+        { kind: 'tool', ok: false, text: 'old', at: new Date(now - 120_000).toISOString() },
+        { kind: 'tool', ok: false, text: 'x', at: new Date(now - 3000).toISOString() },
+        { kind: 'tool', ok: false, text: 'y', at: new Date(now - 2000).toISOString() },
+        { kind: 'tool', ok: false, text: 'z', at: new Date(now - 1000).toISOString() },
+      ],
+    }),
+  );
+  const paths = { activity: file };
+  const summary = readActivitySummary(paths, now, { since: now - 10_000 });
+  assert.equal(summary.failures, 3, 'since 之前的旧账不计');
+  assert.equal(summary.verdict, 'failing');
+  assert.equal(readActivitySummary(paths, now, { since: now - 100 }).verdict, 'idle');
+
+  assert.equal(shouldReleaseSuspended({ suspended: true }, { verdict: 'alive' }), true);
+  assert.equal(shouldReleaseSuspended({ suspended: true }, { verdict: 'failing' }), false);
+  assert.equal(shouldReleaseSuspended({}, { verdict: 'alive' }), false);
+  assert.equal(shouldReleaseSuspended(null, null), false);
 });
 
 test('planLevels 给出 L1 → L2 → L2 的只读计划', () => {
