@@ -1013,6 +1013,9 @@ export function status(opts) {
       armed,
       tag,
       armedAt,
+      // 「主动重启」标记：restart_now 打、看门狗在预期兑现或过期后清。留着过期标记很危险。
+      expectGracefulExit: raw.expectGracefulExit === true,
+      expectGracefulExitAt: typeof raw.expectGracefulExitAt === 'string' ? raw.expectGracefulExitAt : '',
       stateDir,
       armJson: armFile,
       armError: read.error,

@@ -655,15 +655,37 @@ test('宽限期之后进程消失仍然报 process-gone（不再只保护启动�
   assert.equal(signals.find((signal) => signal.type === 'process-gone').hard, true);
 });
 
-test('arm.expectGracefulExit=true 时进程消失按正常退出处理，不产生 process-gone', () => {
+test('arm.expectGracefulExit=true（带时间戳）时进程消失按正常退出处理，不产生 process-gone', () => {
   const now = T0;
   const boot = bootRecord(now, { startedAt: now - 3_600_000, graceUntil: now - 3_480_000 });
-  const arm = armRecord(now, { expectGracefulExit: true });
+  const arm = armRecord(now, {
+    expectGracefulExit: true,
+    expectGracefulExitAt: new Date(now - 60_000).toISOString(),
+  });
   const signals = signalsFor(now, { boot, arm, procs: [] });
   const types = signals.map((signal) => signal.type);
   assert.ok(types.includes('graceful-exit'), `应报 graceful-exit，实际 ${types.join(',')}`);
   assert.ok(!types.includes('process-gone'), '显式声明正常退出时不应报 process-gone');
   assert.equal(signals.find((signal) => signal.type === 'graceful-exit').hard, false);
+});
+
+test('标记过期或没有时间戳时不得放行（否则真崩溃不救）', () => {
+  const now = T0;
+  const boot = bootRecord(now, { startedAt: now - 3_600_000, graceUntil: now - 3_480_000 });
+
+  const stale = armRecord(now, {
+    expectGracefulExit: true,
+    expectGracefulExitAt: new Date(now - 20 * 60_000).toISOString(),
+  });
+  const staleTypes = signalsFor(now, { boot, arm: stale, procs: [] }).map((signal) => signal.type);
+  assert.ok(staleTypes.includes('process-gone'), `过期标记应报 process-gone，实际 ${staleTypes.join(',')}`);
+
+  const noStamp = armRecord(now, { expectGracefulExit: true });
+  const noStampTypes = signalsFor(now, { boot, arm: noStamp, procs: [] }).map((signal) => signal.type);
+  assert.ok(
+    noStampTypes.includes('process-gone'),
+    `没写时间戳的标记应报 process-gone，实际 ${noStampTypes.join(',')}`,
+  );
 });
 
 test('进程活着但心跳超过 90 秒未刷新 → heartbeat-stale（挂死形态）', () => {

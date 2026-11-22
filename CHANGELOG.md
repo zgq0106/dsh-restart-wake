@@ -49,6 +49,12 @@
   事后通报，绝不编造续跑内容。
 - **`restart_status` 增加自愈视图**：合包后一个工具就能看到「现在重启会不会被看门狗当成崩溃」
   （`ownshield.armed / tag / expectGracefulExit`），不用先去问另一个工具。
+- **主动重启标记没有失效机制**（2026-11-22 真机当场发现并修）：`restart_now` 打完
+  `expectGracefulExit` 后，如果看门狗那一轮跑的时候新进程已经起来，`resolveBoot` 会重建 boot、
+  判 `signals=none`，既不走 graceful-exit 也不撤防——标记就永久留在 `arm.json` 里，之后
+  **真崩溃**会被当成正常退出而不救，比不打标记更危险。现在标记带 `expectGracefulExitAt`
+  时间戳，只在 10 分钟窗口内算数；看门狗建起新 boot 后主动清除，过期标记也清。
+  没写时间戳的标记一律不认（人工声明正常退出请用 `autoGracefulExit: "no-crash-evidence"`）。
 
 **新增**
 

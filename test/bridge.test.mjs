@@ -14,8 +14,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
-import { markGracefulExit, readArmState, unmarkGracefulExit } from '../lib/arm-bridge.js'
-import { notifyRecovered } from '../scripts/ownshield/watch.mjs'
+import { markGracefulExit, readArmState, unmarkGracefulExit, gracefulMarkValid, GRACEFUL_MARK_TTL_MS } from '../lib/arm-bridge.js'
+import { notifyRecovered, evaluateSignals } from '../scripts/ownshield/watch.mjs'
 import { appendWill } from '../scripts/ownshield/will.mjs'
 
 function tempDir(label) {
@@ -54,6 +54,9 @@ test('武装时打标记写入 expectGracefulExit 且不丢原字段', () => {
     assert.equal(result.marked, true)
     const after = JSON.parse(readFileSync(file, 'utf8'))
     assert.equal(after.expectGracefulExit, true)
+    // 必须带时间戳：没有它就永远不过期，真崩溃会被当正常退出而不救（11-22 真机踩过）
+    assert.equal(typeof after.expectGracefulExitAt, 'string')
+    assert.ok(!Number.isNaN(Date.parse(after.expectGracefulExitAt)))
     assert.equal(after.tag, 'snap-a')
     assert.equal(after.failures, 0)
   } finally {
@@ -178,6 +181,94 @@ test('没有通报会话时落 markdown，不丢通报', () => {
     })
     assert.equal(result.channel, 'markdown')
     assert.ok(result.file.endsWith('recovered.md'))
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
+test('标记有效期：窗口内认可、超时不认、没时间戳不认', () => {
+  const now = Date.parse('2026-11-22T10:00:00Z')
+  assert.equal(
+    gracefulMarkValid({ expectGracefulExit: true, expectGracefulExitAt: new Date(now - 60_000).toISOString() }, now),
+    true,
+  )
+  assert.equal(
+    gracefulMarkValid(
+      { expectGracefulExit: true, expectGracefulExitAt: new Date(now - GRACEFUL_MARK_TTL_MS).toISOString() },
+      now,
+    ),
+    true,
+  )
+  assert.equal(
+    gracefulMarkValid(
+      { expectGracefulExit: true, expectGracefulExitAt: new Date(now - GRACEFUL_MARK_TTL_MS - 1000).toISOString() },
+      now,
+    ),
+    false,
+  )
+  assert.equal(gracefulMarkValid({ expectGracefulExit: true }, now), false)
+  assert.equal(gracefulMarkValid({ expectGracefulExit: false }, now), false)
+  assert.equal(gracefulMarkValid(null, now), false)
+})
+
+test('过期标记不得把进程消失判成正常退出（真崩溃必须救）', () => {
+  const now = Date.parse('2026-11-22T10:00:00Z')
+  const boot = {
+    pid: 100,
+    path: 'X:\\DeepSeek Harness.exe',
+    startedAt: now - 120_000,
+    detectedAt: now - 119_000,
+    graceUntil: now - 1000,
+    crashBaseline: { newestTime: 0, newestName: '', count: 0 },
+  }
+  const run = (arm) =>
+    evaluateSignals({
+      arm,
+      boot,
+      now,
+      procs: [],
+      procsOk: true,
+      crash: { ok: true, files: [] },
+      heartbeats: [],
+      probes: [],
+      exitEvidence: () => ({ crashEvents: { ok: true, crashed: false, events: [] }, exitCode: null }),
+    })
+
+  const fresh = run({
+    graceSeconds: 120,
+    expectGracefulExit: true,
+    expectGracefulExitAt: new Date(now - 60_000).toISOString(),
+  })
+  assert.ok(fresh.some((signal) => signal.type === 'graceful-exit'))
+
+  const stale = run({
+    graceSeconds: 120,
+    expectGracefulExit: true,
+    expectGracefulExitAt: new Date(now - 20 * 60_000).toISOString(),
+  })
+  assert.ok(stale.some((signal) => signal.type === 'process-gone'))
+
+  const noStamp = run({ graceSeconds: 120, expectGracefulExit: true })
+  assert.ok(noStamp.some((signal) => signal.type === 'process-gone'))
+})
+
+test('readArmState 报告标记是否仍有效', () => {
+  const dir = tempDir('markvalid')
+  try {
+    const file = join(dir, 'arm.json')
+    writeFileSync(
+      file,
+      JSON.stringify({ tag: 'snap-e', expectGracefulExit: true, expectGracefulExitAt: new Date().toISOString() }),
+    )
+    assert.equal(readArmState({ ownshieldDir: dir }).markValid, true)
+
+    writeFileSync(
+      file,
+      JSON.stringify({ tag: 'snap-f', expectGracefulExit: true, expectGracefulExitAt: '2026-11-01T00:00:00Z' }),
+    )
+    const stale = readArmState({ ownshieldDir: dir })
+    assert.equal(stale.expectGracefulExit, true)
+    assert.equal(stale.markValid, false)
   } finally {
     rmSync(dir, { recursive: true, force: true })
   }

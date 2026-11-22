@@ -1081,6 +1081,26 @@ export function classifyProbe(probe) {
   return { structural: false, reason: '' };
 }
 
+/**
+ * 「主动重启」标记的有效期（10 分钟）。与 `lib/arm-bridge.js` 的 `GRACEFUL_MARK_TTL_MS`
+ * 保持一致——本脚本要能脱离包结构独立跑（开发目录也直接用它），所以各留一份。
+ *
+ * 2026-11-22 真机教训：`restart_now` 打标记后，如果看门狗那一轮跑的时候新进程已经起来，
+ * `resolveBoot` 会重建 boot、判 `signals=none`，既不走 graceful-exit 也不撤防，
+ * 标记就永久留在 arm.json 里；之后**真崩溃**会被当成正常退出而不救。标记必须自己会过期。
+ */
+const GRACEFUL_MARK_TTL_MS = 10 * 60 * 1000;
+
+/** 标记此刻还算不算数。没写时间戳的一律不认——宁可多救，不可漏救。 */
+function gracefulMarkValid(arm, now) {
+  if (!arm || arm.expectGracefulExit !== true) return false;
+  const raw = arm.expectGracefulExitAt;
+  if (typeof raw !== 'string' || raw.trim() === '') return false;
+  const at = parseTime(raw);
+  if (at === null) return false;
+  return now - at <= GRACEFUL_MARK_TTL_MS;
+}
+
 export function sameBoot(proc, boot) {
   if (!proc || !boot) return false;
   const start = proc.start;
@@ -1116,7 +1136,7 @@ export function evaluateSignals({
   // boot 只在「进程表里真的见过它」时才会建立，所以 live 为空即确定消失。
   // 宽限期曾把这条判定限制在启动后 120 秒内，导致武装超过两分钟后崩溃完全无信号。
   if (live.length === 0) {
-    if (arm.expectGracefulExit) {
+    if (gracefulMarkValid(arm, now)) {
       signals.push({
         type: 'graceful-exit',
         hard: false,
@@ -1559,6 +1579,25 @@ function updateArmFailures(paths, failures) {
     return true;
   } catch (err) {
     appendLog(paths, { event: 'arm', action: 'update-failures', result: 'fail', detail: err.message });
+    return false;
+  }
+}
+
+/**
+ * 清掉「主动重启」标记：新 boot 已建立（预期兑现）时调用。
+ * 只删这两个字段，arm.json 其余内容原样保留——武装态继续有效。
+ */
+function clearGracefulMark(paths) {
+  const read = readJsonSafe(paths.arm);
+  const value = read.exists && read.value && typeof read.value === 'object' ? read.value : null;
+  if (!value || value.expectGracefulExit !== true) return false;
+  const next = { ...value };
+  delete next.expectGracefulExit;
+  delete next.expectGracefulExitAt;
+  try {
+    writeJsonAtomic(paths.arm, next);
+    return true;
+  } catch {
     return false;
   }
 }
@@ -2204,6 +2243,11 @@ function runLocked({ opts, paths, arm, armId, now, t0 }) {
   const probes = scanProbes(paths.ownshield);
 
   const bootInfo = resolveBoot({ paths, arm, armId, procs, crash, now, dryRun: opts.dryRun });
+  // 新 boot 已建立 = 这次重启已经落地，「上次退出是预期的」这个预期兑现了，标记该消失。
+  // 另外过期标记也要清：万一 boot 一直没换（例如重启失败），脏字段不能躺着。
+  // 不清的话它会一直留着，下一次**真崩溃**就会被当成正常退出而不救。
+  const staleMark = arm.expectGracefulExit === true && !gracefulMarkValid(arm, now);
+  if (!opts.dryRun && (bootInfo.changed || staleMark)) clearGracefulMark(paths);
   const boot = bootInfo.boot;
   const signals = boot
     ? evaluateSignals({
