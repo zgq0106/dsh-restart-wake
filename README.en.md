@@ -60,11 +60,12 @@ What it recovers (verified on real machines):
 | Host hangs (process alive, heartbeat stale for 90 s) | 2–3 min (soft signal, two rounds) | restart |
 | Starts but cannot run: `agent-preset/invalid`, `Duplicate tool group`, `resume failed`, missing tools/services | **up to 6 h** (probe gate is rate-limited) | quarantine the offending patch entry; roll back when attribution misses |
 | Local web cookie expired (401, page refresh fails) | ≤ 1 min (guard runs unarmed too) | restart only, no rollback |
+| Model broke the profile (`cordis.patch.yml` / presets / `package.json`) | no extra time (runs after L2) | **L3**: restores the profile layer only; `node_modules` contents untouched |
 
 What it does **not** recover:
 
 1. **Anything at all while unarmed.** That is the design: it does not hold rollback power day to day.
-2. **Only `app.asar` is rolled back.** Profile presets and plugin config, `node_modules`, memories and sessions under `~/.dsh`, credentials, network and disk are out of scope.
+2. **Rollback has two layers, both bounded.** L1/L2 roll back `app.asar`; L3 restores the profile layer only (`cordis.patch.yml`, preset dirs, `package.json`, `link:` entries). `node_modules` contents, sessions, memories, credentials, network and disk are never inside a snapshot.
 3. **Unknown shapes**: if debridement cannot attribute the error, only the kernel can be rolled back; when the root cause lives in the profile layer that cannot help, so three failures trip the breaker and `needs-human.json` is written.
 4. **Snapshot missing or not matching the live kernel** (e.g. DSH was upgraded in between) — the hash guard refuses to roll back.
 5. **Blind spots with no signal**: a renderer that goes white without a log, a window that stops responding, a corrupted session file, a credential revoked server-side, a third-party plugin throwing inside `apply()`, and **code that still boots but no longer works**.

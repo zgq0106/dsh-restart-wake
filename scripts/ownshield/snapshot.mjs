@@ -307,6 +307,7 @@ function parseArgs(argv) {
     else if (a === '--keep') { const v = argv[++i]; if (v === undefined) throw new Error('--keep 缺少值'); opts.keep = Number(v); }
     else if (a === '--keep-tag') { const v = argv[++i]; if (v === undefined) throw new Error('--keep-tag 缺少值'); (opts.keepTags ||= []).push(v); }
     else if (a === '--with-profile') opts.withProfile = true;
+    else if (a === '--profile-only') { opts.profileOnly = true; opts.withProfile = true; }
     else if (a === '--profile-dir') {
       opts.profileDir = argv[++i];
       if (opts.profileDir === undefined) throw new Error('--profile-dir 缺少值');
@@ -888,9 +889,19 @@ function restore(opts, tag) {
   const m = resolveTag(tag);
   if (!m) throw new Error(`快照不存在: ${tag}`);
 
+  // --profile-only：只还原 profile 层（patch / 预设 / package.json / link），asar 保持不动。
+  // 供看门狗 L3 兜底使用——L1/L2 已经把 asar 回滚过，那时要修的是 profile 层。
+  if (opts.profileOnly) {
+    const pf = m.profile;
+    if (!pf || !Array.isArray(pf.files) || pf.files.length === 0) {
+      throw new Error(`快照 ${tag} 不含 profile 层（建快照时未加 --with-profile），无法只还原 profile`);
+    }
+  }
+
   // A5：--with-profile 时先跑 profile 层（文件 → 链接 → patch），再做 asar 层。
+  // --profile-only 隐含 withProfile（CLI 两个开关同义，API 直调也要一致）。
   let profile = null;
-  if (opts.withProfile) {
+  if (opts.withProfile || opts.profileOnly) {
     profile = restoreProfile(m, opts);
     const stampLabel = profile.dryRun ? '[DRY-RUN] ' : '';
     for (const r of profile.results) console.log(`${stampLabel}profile/${r.rel}: ${r.result} → ${r.target}`);
@@ -903,6 +914,16 @@ function restore(opts, tag) {
       if (opts.json) return console.log(JSON.stringify(out, null, 2));
       console.log(`[DRY-RUN] profile 层校验完成：${profile.results.length} 步，缺项 ${profile.missing.length} 处`);
       return;
+    }
+    // 只还原 profile 层：至此为止，下面的 asar 层一律不跑。
+    if (opts.profileOnly) {
+      const out = { ok: profile.ok, dryRun: false, tag, snapshot: m.dirName, profileOnly: true, profile };
+      if (opts.json) {
+        console.log(JSON.stringify(out, null, 2));
+        return out;
+      }
+      console.log(`profile 层还原完成：${profile.results.length} 步，缺项 ${profile.missing.length} 处（asar 未动）`);
+      return out;
     }
   }
 

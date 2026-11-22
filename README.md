@@ -74,11 +74,12 @@
 | Host 挂死（进程在、心跳 90 s 不刷新） | 2–3 min（软信号复现两次） | 重启 |
 | 启动后跑不动：`agent-preset/invalid`、`Duplicate tool group`、`resume failed`、工具/服务清单缺失 | **最长 6 小时**（探针闸限流） | 归因到具体 patch 条目则隔离；归因不命中则回滚 |
 | 本地 Web cookie 过期（401，刷新页面即失败） | ≤ 1 min（守卫在未看护时也在跑） | 只重启，不回滚 |
+| 模型改坏 profile（`cordis.patch.yml` / 预设 / `package.json`） | 不额外计时（排在 L2 之后） | **L3**：只还原 profile 层；`node_modules` 实体不动 |
 
 救不了，别指望：
 
 1. **看护没开启时，任何故障都不救。** 这是设计：平时它不持有回滚权。
-2. **只回滚 `app.asar`。** profile 预设与插件配置、`node_modules`、`~/.dsh` 下的记忆与会话、凭据、网络、磁盘，都不在回滚范围。
+2. **回滚分两层，两层都有边界。** L1/L2 回滚 `app.asar`；L3 只还原 profile 层（`cordis.patch.yml`、预设目录、`package.json`、`link:` 关系）。`node_modules` 实体、会话、记忆、凭据、网络、磁盘都不在任何快照内。
 3. **未知形态**：清创认不出的错误只能回滚内核；根因在 profile 层时回滚无效，连续失败三次即熔断，写 `needs-human.json` 交人。
 4. **快照缺失或与当前内核不一致**（例如中途升级过 DSH）时，哈希闸拒绝回滚。
 5. **无信号盲区**：渲染进程白屏但不写 log、窗口无响应、会话文件损坏、凭据被服务端吊销、第三方插件 `apply()` 抛错，以及**代码能启动但功能坏了**。

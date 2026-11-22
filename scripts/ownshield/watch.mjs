@@ -1307,9 +1307,19 @@ export function decideRecovery({ signals, strikes, confirmations = {} }) {
 export function nextLevel(arm, state) {
   const attempts = state?.recoveryAttempts ?? 0;
   if (attempts >= arm.maxRecoveryAttempts) return null;
-  if (arm.maxLevel >= 1 && !state?.levelsUsed?.L1) return 'L1';
+  const used = state?.levelsUsed ?? {};
+  // L1 清创/回滚 → L2 回 baseline → L3 只还原 profile 层（asar 已回滚过，根因在 profile 时才管用）。
+  if (arm.maxLevel >= 1 && !used.L1) return 'L1';
+  if (arm.maxLevel >= 3 && !used.L3 && (used.L2 ?? 0) >= 1) return 'L3';
   if (arm.maxLevel >= 2) return 'L2';
   return null;
+}
+
+/** 某一级用哪份快照：L1 = 看护时那版，L2 = baseline，L3 = profile 层（缺省沿用 L1 那版）。 */
+export function levelTag(arm, level) {
+  if (level === 'L1') return arm.tag;
+  if (level === 'L3') return arm.profileTag || arm.tag;
+  return arm.baselineTag;
 }
 
 // ---------------------------------------------------------------------------
@@ -1425,7 +1435,7 @@ function resolveBoot({ paths, arm, armId, procs, crash, now, dryRun }) {
 // 恢复动作
 // ---------------------------------------------------------------------------
 
-function restoreSnapshot(tag) {
+function restoreSnapshot(tag, { profileOnly = false } = {}) {
   if (!fs.existsSync(SNAPSHOT_CLI)) {
     return { ok: false, error: `快照器不存在: ${SNAPSHOT_CLI}` };
   }
@@ -1438,7 +1448,9 @@ function restoreSnapshot(tag) {
       error: `快照 tag 不存在: ${tag}（可用: ${known.join(', ') || '无'}）。arm.tag 要填 manifest 里的 tag，不是快照目录名`,
     };
   }
-  const result = runCaptured(process.execPath, [SNAPSHOT_CLI, 'restore', tag, '--json'], {
+  const args = [SNAPSHOT_CLI, 'restore', tag, '--json'];
+  if (profileOnly) args.push('--profile-only');
+  const result = runCaptured(process.execPath, args, {
     timeoutMs: 300_000,
     tag: 'restore',
   });
@@ -2494,7 +2506,7 @@ function runLocked({ opts, paths, arm, armId, now, t0 }) {
     return { exitCode: EXIT.NEEDS_HUMAN, output: base };
   }
 
-  const tag = level === 'L1' ? arm.tag : arm.baselineTag;
+  const tag = levelTag(arm, level);
   base.plan = planLevels(arm, state);
   base.decision = { ...decision, level, tag };
 
@@ -2535,13 +2547,15 @@ function runLocked({ opts, paths, arm, armId, now, t0 }) {
       break;
     }
     refreshLock(paths, armId);
-    const currentTag = currentLevel === 'L1' ? arm.tag : arm.baselineTag;
+    const currentTag = levelTag(arm, currentLevel);
 
     // 快照过期闸：快照与当前安装不是同一份时，回滚等于降级——停手交人，宁可不动。
-    // cookie 过期不回滚，这道闸对它没有意义，直接跳过。
+    // cookie 过期不回滚，这道闸对它没有意义，直接跳过；L3 只还原 profile 层、不碰 asar，同理跳过。
     const guard = cookieOnly
       ? { ok: true, skipped: true, reason: 'cookie-only', detail: 'cookie 过期只重启，不回滚 asar' }
-      : checkSnapshotGuard(currentTag, { asarPath: resolveInstallAsar(exe) });
+      : currentLevel === 'L3'
+        ? { ok: true, skipped: true, reason: 'profile-only', detail: 'L3 只还原 profile 层，不动 asar，不做哈希闸' }
+        : checkSnapshotGuard(currentTag, { asarPath: resolveInstallAsar(exe) });
     base.snapshotGuard = guard;
     if (!guard.ok) {
       appendLog(paths, {
@@ -2606,7 +2620,7 @@ function runLocked({ opts, paths, arm, armId, now, t0 }) {
         result: 'start',
         tag: currentTag,
       });
-      restore = restoreSnapshot(currentTag);
+      restore = restoreSnapshot(currentTag, { profileOnly: currentLevel === 'L3' });
       appendLog(paths, {
         event: 'recover',
         arm: arm.tag,
@@ -2705,6 +2719,7 @@ function runLocked({ opts, paths, arm, armId, now, t0 }) {
     state.attempts = [...state.attempts, attempt].slice(-20);
     state.recoveryAttempts = (state.recoveryAttempts || 0) + 1;
     if (currentLevel === 'L1') state.levelsUsed.L1 = true;
+    else if (currentLevel === 'L3') state.levelsUsed.L3 = true;
     else state.levelsUsed.L2 = (state.levelsUsed.L2 || 0) + 1;
     state.strikes = {};
     state.lastCheckAt = iso(Date.now());
@@ -2789,9 +2804,10 @@ export function planLevels(arm, state) {
   for (let i = 0; i < 8; i++) {
     const level = nextLevel(arm, simulated);
     if (!level) break;
-    plan.push({ level, tag: level === 'L1' ? arm.tag : arm.baselineTag });
+    plan.push({ level, tag: levelTag(arm, level) });
     simulated.recoveryAttempts += 1;
     if (level === 'L1') simulated.levelsUsed.L1 = true;
+    else if (level === 'L3') simulated.levelsUsed.L3 = true;
     else simulated.levelsUsed.L2 = (simulated.levelsUsed.L2 ?? 0) + 1;
   }
   return plan;

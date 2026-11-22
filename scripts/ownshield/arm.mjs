@@ -533,6 +533,30 @@ export function listSnapshotTags(dir) {
   return tags;
 }
 
+/**
+ * 该 tag 的快照是否带 profile 层（建快照时加过 --with-profile）。
+ * 带才启用 L3：L3 只还原 profile，不碰 asar；不带的快照走 L3 只会白费一次尝试。
+ */
+export function manifestHasProfile(dir, tag) {
+  let entries = [];
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return false;
+  }
+  for (const ent of entries) {
+    if (!ent.isDirectory() || ent.name === 'blobs') continue;
+    try {
+      const raw = JSON.parse(fs.readFileSync(path.join(dir, ent.name, 'manifest.json'), 'utf8').replace(/^\uFEFF/, ''));
+      if (raw?.tag !== tag) continue;
+      return Array.isArray(raw?.profile?.files) && raw.profile.files.length > 0;
+    } catch {
+      /* 坏 manifest 跳过 */
+    }
+  }
+  return false;
+}
+
 /** 等价于 watch.mjs --check-snapshot <tag> 返回 0。 */
 export function checkSnapshotGuard(tag) {
   if (!fs.existsSync(WATCH_CLI)) {
@@ -633,6 +657,7 @@ function parseArgs(argv) {
     else if (arg === '--task-name') opts.taskName = argv[++i] ?? '';
     else if (arg === '--process-name') opts.processName = argv[++i] ?? '';
     else if (arg === '--node-path') opts.nodePath = argv[++i] ?? '';
+    else if (arg === '--max-level') opts.maxLevel = Number(argv[++i]);
     else if (arg.startsWith('--tag=')) opts.tag = arg.slice('--tag='.length);
     else if (arg.startsWith('--notify-session=')) opts.notifySession = arg.slice('--notify-session='.length);
     else if (arg.startsWith('--state-dir=')) opts.stateDir = arg.slice('--state-dir='.length);
@@ -826,13 +851,17 @@ export function arm(opts) {
     return { exitCode: EXIT.OK, output: { ok: true, ...base } };
   }
 
+  // 快照带 profile 层就默认启用 L3（asar 回滚后仍失败时，用 profile 层兜底）。
+  const profileAvailable = manifestHasProfile(snapshots.dir, tag);
+  const maxLevel = Number.isFinite(opts.maxLevel) ? opts.maxLevel : profileAvailable ? 3 : ARM_DEFAULTS.maxLevel;
   const payload = {
     tag,
     armedAt: base.armedAt,
     graceSeconds: ARM_DEFAULTS.graceSeconds,
-    maxLevel: ARM_DEFAULTS.maxLevel,
+    maxLevel,
     maxRecoveryAttempts: ARM_DEFAULTS.maxRecoveryAttempts,
     baselineTag: ARM_DEFAULTS.baselineTag,
+    ...(profileAvailable && maxLevel >= 3 ? { profileTag: tag } : {}),
     failures: ARM_DEFAULTS.failures,
     launcherPath,
     nodePath: node.path,

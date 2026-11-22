@@ -1,5 +1,13 @@
 # Changelog
 
+## 未发布
+
+- **L3：profile 层还原**（2026-11-22）：看护链在 L2 之后增加一级——只还原 `cordis.patch.yml`、预设目录、`package.json` 与 `link:` 关系，**不碰 `app.asar`**。
+  `snapshot.mjs` 新增 `--profile-only`（隐含 `--with-profile`）；`arm.mjs` 检测到快照带 profile 层时自动把 `arm.json` 的 `maxLevel` 提到 3 并写 `profileTag`；L3 跳过 asar 哈希闸（它本来就不动 asar）。
+  不包含 `node_modules` 实体、会话、记忆、凭据——这几类不进任何快照。
+  新增测试 `test/profile-layer.test.mjs`（3 项）：只还原 profile 且 asar 不动、原件留 `.bak-` 备份；asar-only 快照明确拒绝；manifest 能识别 profile 层。
+  这一级解决的是「根因在 profile 层、回滚 asar 无效 → 三次熔断」那个缺口。
+
 ## 2.0.0 (2026-11-21)
 
 三个包并成一个：本包现在同时提供**重启/唤醒**、**本体自愈**与**故障回注**。

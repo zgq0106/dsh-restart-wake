@@ -21,6 +21,7 @@ import {
   decideRecovery,
   evaluateSignals,
   nextLevel,
+  levelTag,
   normalizeArm,
   normalizeBoot,
   normalizeState,
@@ -363,6 +364,25 @@ test('maxLevel=1 时 L1 用尽即交人', () => {
   const arm = { ...armRecord(T0), maxLevel: 1 };
   assert.equal(nextLevel(arm, normalizeState(null)), 'L1');
   assert.equal(nextLevel(arm, normalizeState({ recoveryAttempts: 1, levelsUsed: { L1: true } })), null);
+});
+
+test('maxLevel=3：L1 → L2 → L3，L3 用 profileTag，缺省退回 arm.tag', () => {
+  const arm = { ...armRecord(T0), maxLevel: 3, profileTag: 'snap-with-profile' };
+  assert.equal(nextLevel(arm, normalizeState(null)), 'L1');
+  assert.equal(nextLevel(arm, normalizeState({ recoveryAttempts: 1, levelsUsed: { L1: true } })), 'L2');
+  assert.equal(nextLevel(arm, normalizeState({ recoveryAttempts: 2, levelsUsed: { L1: true, L2: 1 } })), 'L3');
+  // L3 用掉之后回到 L2，次数用尽交人
+  assert.equal(
+    nextLevel(arm, normalizeState({ recoveryAttempts: 3, levelsUsed: { L1: true, L2: 1, L3: true } })),
+    null,
+  );
+  assert.deepEqual(
+    planLevels(arm, normalizeState(null)).map((step) => step.level),
+    ['L1', 'L2', 'L3'],
+  );
+  assert.equal(levelTag(arm, 'L3'), 'snap-with-profile');
+  assert.equal(levelTag({ ...arm, profileTag: undefined }, 'L3'), arm.tag);
+  assert.equal(levelTag(arm, 'L2'), arm.baselineTag);
 });
 
 test('planLevels 给出 L1 → L2 → L2 的只读计划', () => {
