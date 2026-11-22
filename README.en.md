@@ -5,7 +5,7 @@
 One package, eleven Agent tools, one set of startup hooks: restart & wake, core probes, snapshots with a watchdog, and failure re-injection.
 
 - Package: `dsh-restart-wake`
-- Version: **2.0.0**
+- Version: **2.1.0**
 - Platform: **restart, cookie cleanup and the self-healing chain are Windows-only**; wake-up, registration and status queries are cross-platform
 - Dependencies: none (Node built-ins only)
 - DSH: requires **≥ `0.2.2-alpha.2`**; tested on `0.2.2-rc.2`
@@ -40,7 +40,7 @@ Some failures never write a crash log: Harness starts, the UI works, but creatin
 
 | Face | Tools | What it does |
 |---|---|---|
-| Probe (always available) | `ownshield_probe` | Detect only: create a temp session, send `probe`, resume a fixed session, compare tool/service inventories, read cookie and credential warnings |
+| Probe (always available) | `ownshield_probe` | Detect only. Four static checks by default (tools / services / heartbeat / credentials) — no session, no tokens; pass `deep: true` to create a temp session, send `probe`, and resume a fixed session |
 | Recovery chain (armed on demand) | `ownshield_snapshot` / `ownshield_arm` / `ownshield_disarm` / `ownshield_status` | Snapshot and arm before touching `src/`, asar or the kernel; on breakage the watchdog rolls back → restarts → verifies → reports, then **disarms itself** |
 
 The chain is not resident: only a watchdog with `arm.json` present holds rollback power.

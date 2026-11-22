@@ -1,6 +1,6 @@
 # Changelog
 
-## 未发布
+## 2.1.0 (2026-11-22)
 
 - **恢复校验看「模型能不能用」**（2026-11-22）：`verifyAfterRestart` 增加 `model-unusable` —— 只认**本次重启之后**的纸条记录（`activity.json`，用 `since` 排除旧账）：有成串失败且零成功则判失败，不再因为「进程在、没新 crash log」就报成功；无流量则记 `+model-unverified`，不阻塞。
 - **熔断改挂起**（2026-11-22）：连续失败到阈值后不再撤防，`needs-human.json` 照写、自动修复停手，但 `arm.json` 保留继续观察；纸条出现成功操作即自动停止看护（`suspend-release`）。依据：模型能继续工作时，现场该交给它自己修。

@@ -5,7 +5,7 @@
 一个包，十一件工具，一套启动钩子：重启与唤醒、本体探针、快照与看门狗、故障回注。
 
 - 插件名：`dsh-restart-wake`
-- 版本：**2.0.0**
+- 版本：**2.1.0**
 - 平台：**重启、cookie 清理、自愈链仅 Windows**；唤醒、登记、状态查询跨平台
 - 依赖：无（只用 Node 内置模块）
 - DSH 版本：要求 **≥ `0.2.2-alpha.2`**；`0.2.2-rc.2` 实测
@@ -17,6 +17,8 @@
 > 升级步骤：① 从 profile 的 `dsh.profile.bundles` 删掉 `dsh-ownshield` 和 `dsh-ownshield-inject`；② 从 `dependencies` 删掉对应的两条；③ 再装 / 更新本包；④ 重启 Harness。
 >
 > **不卸就装会导致 `ownshield_*` 五个工具各注册两遍**，启动日志报重复标识，整组工具可能加载失败。工具名与行为在 2.0 没有变——变的是它们现在由同一个包提供。
+>
+> **2.0.0 → 2.1.0 不用卸包**，直接更新。2.1 只加能力，不改工具名；唯一的行为变化是 `ownshield_probe` 默认不再建会话——需要验证「会话能不能跑」时传 `deep: true`。
 
 ---
 
@@ -26,6 +28,7 @@
 
 | 插件版本 | 支持的 DSH 版本 | 说明 |
 |---|---|---|
+| **2.1.0** | **≥ `0.2.2-alpha.2`** | 新增 L3 profile 层还原、纸条探针、熔断挂起；探针默认静态 |
 | **2.0.0** | **≥ `0.2.2-alpha.2`** | 合并自愈能力；提示使用 `schedule_edit` 与 `rrule` |
 | v0.1.6 | **≥ `0.2.2-alpha.2`** | 仅重启与唤醒 |
 | v0.1.0 – v0.1.5 | `< 0.2.2-alpha.2` | 提示使用 `schedule_delete` 与 `after_seconds`；新版 DSH 上已不存在 |
@@ -54,7 +57,7 @@
 
 | 面孔 | 工具 | 做什么 |
 |---|---|---|
-| 探针（默认，随时可用） | `ownshield_probe` | 只检测不修复：建临时会话、发一条 `probe`、resume 固定会话、比对工具/服务清单、查 cookie 与凭据告警 |
+| 探针（默认，随时可用） | `ownshield_probe` | 只检测不修复。默认四项静态检查（工具清单 / 服务 / 心跳 / 凭据），零会话零 token；传 `deep: true` 才建临时会话、发 `probe`、resume 固定会话 |
 | 自愈链（按需看护，非常驻） | `ownshield_snapshot` / `ownshield_arm` / `ownshield_disarm` / `ownshield_status` | 改 `src/`、asar 或内核前建快照并看护；崩了由看门狗回滚 → 重启 → 校验 → 通报；**恢复成功自动停止看护** |
 
 自愈链不常驻：只有看护期间看门狗才持有回滚权。恢复链脚本随包分发在 `scripts/ownshield/`。
@@ -133,7 +136,7 @@ dsh plugin --profile desktop add "git+https://github.com/zgq0106/dsh-restart-wak
 
 | 工具 | 作用 |
 |---|---|
-| `ownshield_probe` | 七项检查，只检测不修复；结果写到 `~/.dsh/ownshield/probe-<时间戳>.json` |
+| `ownshield_probe` | 默认四项静态检查（零会话、零 token）；`deep: true` 再加建会话三项。结果写到 `~/.dsh/ownshield/probe-<时间戳>.json` |
 | `ownshield_snapshot` | 给 `app.asar` 建内容寻址快照，返回 tag 与占用 |
 | `ownshield_arm` | 检查快照存在 / 快照闸 / DSH 进程 / Node 可执行，写 `arm.json` 并幂等创建每分钟一次的计划任务；**已在看护时默认拒绝覆盖回滚点**，要换快照请显式传 `replace: true`（同一 tag 重复调用按幂等放行） |
 | `ownshield_disarm` | 停止看护：`arm.json` 归档到 `disarm/`，不删计划任务（未在看护时它仍跑 cookie 守卫） |
@@ -496,7 +499,7 @@ lib/cookie.js                cookie 库只读检查
 lib/prompt.js                内置协议提示（两小节）
 lib/tools.js                 重启侧 6 个工具
 lib/tools-ownshield.js       自愈侧 5 个工具
-lib/probe.js                 七项检查
+lib/probe.js                 探针（默认静态四项；deep 才建会话）
 lib/auth-gate.js             凭据文档与登录日志只读检查
 lib/node-runtime.js          node.exe 探测
 lib/util.js                  共用小工具

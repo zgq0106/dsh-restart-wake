@@ -1,21 +1,19 @@
 # 发布到 GitHub
 
-本包已按可发布状态整理完毕。下面每一步都有可验证的完成信号。当前版本 **2.0.0**。
+本包已按可发布状态整理完毕。下面每一步都有可验证的完成信号。当前版本 **2.1.0**。第 1–3 节（建仓库、上传、门面）已于 2026-11-12 完成，这里保留作复用参考。
 
 ## 0. 发布前自查
 
 ```powershell
 cd <repo>\dsh-restart-wake
 node --check index.js
-npm test                            # 应为 5 套全绿：28 / 24 / 28 / 13 / 7
-node scripts/ownshield/watch.test.mjs        # 38 passed, 0 failed
-node scripts/ownshield/cookie-guard.test.mjs # 7 passed, 0 failed
+npm test                            # 11 套全绿（smoke / ownshield-smoke / bridge / prune / profile-layer / probe-cleanup / inject 三套 / watch / cookie-guard）
 npm pack --dry-run --json --cache <tmp>\npm-cache
 ```
 
-`npm pack` 应列出 **46 个文件 / 约 627 KB**，包含 `index.js`、`lib/`（19 个）、`scripts/`（恢复链 7 个 + 重启 4 个）、`test/`（5 个）、`docs/`、`locale/`、`icon.svg`；**不得包含** `node_modules`、`tools/`、`scripts/ownshield/vendor/`、日志或 `tmp/`。
+`npm pack` 应列出 **55 个文件 / 约 756 KB**（压缩包约 234 KB），包含 `index.js`、`lib/`、`scripts/`（恢复链 + 重启）、`test/`、`docs/`、`locale/`、`icon.svg`；**不得包含** `node_modules`、`tools/`、`scripts/ownshield/vendor/`、日志或 `tmp/`。
 
-### 2.0.0 额外的发布前核对
+### 2.1.0 额外的发布前核对
 
 - [ ] `scripts/ownshield/` 的 7 个文件与开发目录 `tools/ownshield/` 同名文件 **sha256 逐个一致**
 - [ ] 包内**没有任何**本机绝对路径（形如 `E:\...` 的盘符路径，含注释与示例）
@@ -76,13 +74,13 @@ git push -u origin main
 ## 4. 版本标签与 Release
 
 ```powershell
-git tag v2.0.0
-git push origin v2.0.0
+git tag v2.1.0
+git push origin v2.1.0
 ```
 
-网页 → Releases → Draft a new release → 选 `v2.0.0` → 描述抄 `CHANGELOG.md` 的 2.0.0 段（**务必保留「破坏性变更：本包取代 dsh-ownshield 与 dsh-ownshield-inject，升级须先卸旧两包」那一段**）→ Publish。
+网页 → Releases → Draft a new release → 选 `v2.1.0` → 描述抄 `CHANGELOG.md` 的 2.1.0 段；**2.0.0 的破坏性变更（取代 dsh-ownshield 与 dsh-ownshield-inject）要在正文里再提醒一次**——从 0.1.x 直升的人会跳过中间的 release → Publish。
 
-网页上传路线等价做法：Draft a new release → Choose a tag 输入 `v2.0.0` → Create new tag on publish。
+网页上传路线等价做法：Draft a new release → Choose a tag 输入 `v2.1.0` → Create new tag on publish。
 
 ## 5. 验证别人真能装
 
@@ -119,9 +117,9 @@ dsh plugin --profile desktop add github:zgq0106/dsh-restart-wake
 ## 7. 发布后检查清单
 
 - [ ] `package.json` 的 `name` 与仓库名一致
-- [ ] `version` 为 `2.0.0`，`CHANGELOG.md` 顶部有对应段落
+- [ ] `version` 为 `2.1.0`，`CHANGELOG.md` 顶部有对应段落
 - [ ] LICENSE MIT，`license` 字段也是 MIT
-- [ ] `v2.0.0` tag 与 Release 可打开，Release 描述含升级须知
+- [ ] `v2.1.0` tag 与 Release 可打开，Release 描述含 2.0.0 的升级须知
 - [ ] `dsh-plugin` 等 topics 已设
 - [ ] 全新 profile（或另一台机器）实测安装 + 重启后 11 个工具可见
 - [ ] 已有 `dsh-ownshield` 的 profile 按升级须知操作后无重复工具告警
