@@ -18,7 +18,7 @@ npm pack --dry-run --json --cache <tmp>\npm-cache
 - [ ] `node tools/sync-ownshield-scripts.mjs` 退出码 0（包内 `scripts/ownshield/` 与开发目录 `tools/ownshield/` 同名文件 sha256 全一致；有差异它自己会列出来）
 - [ ] 包内**没有任何**本机绝对路径（形如 `E:\...` 的盘符路径，含注释与示例）
 - [ ] `package.json` 的 `version` 与 `CHANGELOG.md` 顶部段落一致
-- [ ] `README.md` 首屏仍有「升级须先卸两个旧包」的警示块
+- [ ] `README.md` 首屏只写「直接更新」与行为变化，不出现任何卸载/迁移步骤
 
 ## 1. 建仓库
 
@@ -78,7 +78,7 @@ git tag v2.1.0
 git push origin v2.1.0
 ```
 
-网页 → Releases → Draft a new release → 选 `v2.1.0` → 描述抄 `CHANGELOG.md` 的 2.1.0 段。**2.0.0 合并的 `dsh-ownshield` / `dsh-ownshield-inject` 从未公开发布**，公开用户从 v0.1.6 直升不受影响；正文里说明「新增自愈能力、工具 6 → 11」即可，不要写「先卸旧包」的步骤。
+网页 → Releases → Draft a new release → 选 `v2.1.0` → 描述抄 `CHANGELOG.md` 的 2.1.0 段。正文说明「新增自愈能力、工具 6 → 11」即可，不需要写升级步骤——从 0.1.x 直接更新即可。
 
 网页上传路线等价做法：Draft a new release → Choose a tag 输入 `v2.1.0` → Create new tag on publish。
 
@@ -93,15 +93,6 @@ dsh plugin --profile desktop add github:zgq0106/dsh-restart-wake
 3. 新会话问 Agent「你有哪些 restart_、wake_ 或 ownshield_ 开头的工具」，应看到 **11 个**；
 4. 调用 `restart_status`，应报出可执行文件路径与脚本状态；
 5. 调用 `ownshield_status`，应报出看护状态、计划任务是否存在、快照库路径。
-
-### （仅本机开发）从 dsh-ownshield 迁移的真机验证
-
-这两个旧包从未公开发布，这一节只是开发者本机的回归验证，不是用户升级路径：
-
-1. 在已装 `dsh-ownshield` 的 profile 里，先按 README 首屏的例外注记卸掉 `dsh-ownshield` 与 `dsh-ownshield-inject`；
-2. 装本包并重启；
-3. 启动日志里**不应出现**重复工具标识告警；
-4. 注入段应只有一段，含「重启与唤醒」「本体自愈」两个小节。
 
 ## 6. 提交到社区目录（可选）
 
@@ -121,9 +112,8 @@ dsh plugin --profile desktop add github:zgq0106/dsh-restart-wake
 - [ ] `package.json` 的 `name` 与仓库名一致
 - [ ] `version` 为 `2.1.0`，`CHANGELOG.md` 顶部有对应段落
 - [ ] LICENSE MIT，`license` 字段也是 MIT
-- [ ] `v2.1.0` tag 与 Release 可打开，Release 描述说明 2.0 起合入自愈能力（旧实验包从未公开发布，用户无需卸包）
+- [ ] `v2.1.0` tag 与 Release 可打开，Release 描述说明 2.0 起合入自愈能力
 - [ ] `dsh-plugin` 等 topics 已设
 - [ ] 全新 profile（或另一台机器）实测安装 + 重启后 11 个工具可见
-- [ ] （本机）手工装过 `dsh-ownshield` 的 profile 按首屏例外注记卸掉后无重复工具告警
 - [ ] README 里没有本机私有路径、内网地址、凭据
 - [ ] `scripts/ownshield/` 里没有指向开发工作区的绝对路径

@@ -20,15 +20,12 @@
 三个包并成一个：本包现在同时提供**重启/唤醒**、**本体自愈**与**故障回注**。
 一条安装命令、一个版本号、11 个 Agent 工具、1 段注入提示。
 
-**破坏性变更（升级前必读）**
+**升级说明**
 
-- 本包**取代** `dsh-ownshield`（0.1.0）与 `dsh-ownshield-inject`（0.1.0）——这两个包是本地实验包，
-  **从未公开发布**；公开用户从 v0.1.6 直升 2.x 时 profile 里没有它们，直接更新即可，不存在合并问题。
-  只有在本机手工装过旧包时（例如从源码目录 `link:` 进去）才需要**先卸掉它们**，并清掉 profile
-  `cordis.patch.yml` 里各自的 `insert` 行；否则同一个工具会被注册两次（重名注册的后果取决于 DSH
-  的注册实现），自愈提示也会出现两遍。
+- 直接更新即可：2.x 在同一个包里补齐自愈与回注能力（工具 6 → 11），
+  profile 的 `dsh.profile.bundles` 行保持不动，状态目录仍是 `~/.dsh/ownshield`。
 - 配置字段改名（仅回注侧，语义冲突）：`pendingDir` → `injectDir`，`logPath` → `injectLogPath`。
-  状态目录不变，仍是 `~/.dsh/ownshield`，老用户历史文件原地可读。
+  状态目录不变，仍是 `~/.dsh/ownshield`，历史文件原地可读。
 - 提示开关拆成两个：`restartPromptEnabled` / `ownshieldPromptEnabled`（都缺省 `true`）。
   旧字段 `promptEnabled: false` 仍然有效，等价于两者都关。
 - 自愈判定、回滚、快照闸、cookie 守卫等运行逻辑**一行未改**；工具名、参数与描述**一字未改**。
@@ -90,7 +87,7 @@
 **新增**
 
 - `lib/config-ownshield.js` / `lib/config-inject.js` / `lib/tools-ownshield.js` /
-  `lib/pending-inject.js`：分别搬自 `dsh-ownshield` 与 `dsh-ownshield-inject`，只改导入与导出名。
+  `lib/pending-inject.js`：分别搬自两个早期实验模块，只改导入与导出名。
 - `scripts/ownshield/`：恢复链的**运行期闭包**随包发布（`arm.mjs` / `asar.mjs` / `debride.mjs` /
   `snapshot.mjs` / `watch.mjs`），外加两个可自验测试 `watch.test.mjs`（38 项）与
   `cookie-guard.test.mjs`（7 项）。验收、演练、取证类脚本（`acceptance.mjs`、`drill-a4.mjs`、
@@ -101,8 +98,8 @@
   而该工具本身不留；同目录的 `snapshot-engine.mjs` / `redact-vault.mjs` / `zip-export.mjs`
   三个实验模块经核查**没有任何调用者**，同样留库。运行期不需要 vendor 下任何文件。
 - `cookie-guard.test.mjs` 的 auth-gate 引用改为按布局解析：包内走 `../../lib/auth-gate.js`，
-  开发目录回落 `../../dsh-ownshield/lib/auth-gate.js`。此前写死开发路径，用户装包后跑包内测试会红。
-- `README.md` / `README.en.md` / `locale/*.json` 合并重写：首屏声明本包取代两个旧包、升级须先卸旧包。
+  开发目录按相对布局回落。此前写死本机开发路径，用户装包后跑包内测试会红。
+- `README.md` / `README.en.md` / `locale/*.json` 合并重写：首屏写清升级路径与 11 个工具的分工。
 
 ## 0.1.6 (2026-11-12)
 
