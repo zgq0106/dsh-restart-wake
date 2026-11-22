@@ -47,6 +47,31 @@ The chain is not resident: only a watchdog with `arm.json` present holds rollbac
 
 A third, quieter capability: **failure re-injection**. Recovery reports written when the watchdog gives up are delivered back into the affected session on the next startup (and every 5 minutes while running); a failing model request (`401` / `429`) injects its failure scene into the current conversation so the model can see it and tell the user.
 
+### 3. What it recovers, and what it does not
+
+**One sentence**: arm before you touch the core — if Harness crashes, hangs, or starts but cannot run, it is noticed within a minute, rolled back and restarted in about twenty seconds, and the session resumes, unattended. Arming is on demand, rollback covers the core only, and three consecutive failures stop the chain and hand over to a human.
+
+What it recovers (verified on real machines):
+
+| Failure | Detection | Action |
+|---|---|---|
+| Main process crashes / is killed / exits on its own | ≤ 60 s | debridement → roll back `app.asar` → restart → verify → report; measured 22 s |
+| A new crash log appears | ≤ 60 s | same |
+| Host hangs (process alive, heartbeat stale for 90 s) | 2–3 min (soft signal, two rounds) | restart |
+| Starts but cannot run: `agent-preset/invalid`, `Duplicate tool group`, `resume failed`, missing tools/services | **up to 6 h** (probe gate is rate-limited) | quarantine the offending patch entry; roll back when attribution misses |
+| Local web cookie expired (401, page refresh fails) | ≤ 1 min (guard runs unarmed too) | restart only, no rollback |
+
+What it does **not** recover:
+
+1. **Anything at all while unarmed.** That is the design: it does not hold rollback power day to day.
+2. **Only `app.asar` is rolled back.** Profile presets and plugin config, `node_modules`, memories and sessions under `~/.dsh`, credentials, network and disk are out of scope.
+3. **Unknown shapes**: if debridement cannot attribute the error, only the kernel can be rolled back; when the root cause lives in the profile layer that cannot help, so three failures trip the breaker and `needs-human.json` is written.
+4. **Snapshot missing or not matching the live kernel** (e.g. DSH was upgraded in between) — the hash guard refuses to roll back.
+5. **Blind spots with no signal**: a renderer that goes white without a log, a window that stops responding, a corrupted session file, a credential revoked server-side, a third-party plugin throwing inside `apply()`, and **code that still boots but no longer works**.
+6. **The limits of "in place"**: what comes back is a new process. The session is restored from disk and resumed; tool calls that never landed and half-written files are not repaired.
+
+One more note: this chain does not care who caused the failure — it only recognises "a rollbackable break in the kernel layer". So "failures caused by the model" is not a special coverage area; do not market that qualifier as a capability.
+
 ---
 
 ## Install

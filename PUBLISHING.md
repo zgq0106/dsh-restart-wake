@@ -94,7 +94,7 @@ dsh plugin --profile desktop add github:zgq0106/dsh-restart-wake
 2. 插件管理页应出现「重启唤醒 + 本体自愈」条目与图标；
 3. 新会话问 Agent「你有哪些 restart_、wake_ 或 ownshield_ 开头的工具」，应看到 **11 个**；
 4. 调用 `restart_status`，应报出可执行文件路径与脚本状态；
-5. 调用 `ownshield_status`，应报出武装状态、计划任务是否存在、快照库路径。
+5. 调用 `ownshield_status`，应报出看护状态、计划任务是否存在、快照库路径。
 
 ### 从 dsh-ownshield 迁移的真机验证
 
@@ -108,7 +108,7 @@ dsh plugin --profile desktop add github:zgq0106/dsh-restart-wake
 - `kejixiaoliang/awesome-dsh-plugins` → 分类 **Developer Tools / 开发工具**，加一行：
 
   ```markdown
-  - [dsh-restart-wake](https://github.com/zgq0106/dsh-restart-wake) — 让 Agent 安全重启 Harness 并自动唤醒原会话；改内核前建快照并武装看门狗，崩了自动回滚重启校验；11 个工具
+  - [dsh-restart-wake](https://github.com/zgq0106/dsh-restart-wake) — 让 Agent 安全重启 Harness 并自动唤醒原会话；改内核前建快照并开启看护，崩了自动回滚重启校验；11 个工具
   ```
 
 - `awesome-deepseekharness/awesome-deepseek-harness` → **🧩 Tools, Workflows & Presets**，同时改 `README.md` 与 `README.zh.md`。

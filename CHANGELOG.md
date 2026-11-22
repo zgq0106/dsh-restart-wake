@@ -35,13 +35,13 @@
 - **主动重启会被看门狗误判成崩溃**（合包后才可能撞上）：`restart_now` 现在在调度前给
   `arm.json` 打 `expectGracefulExit` 标记（`lib/arm-bridge.js`）。看门狗判崩溃只有「拿到
   退出码 0」这一条自证路径，而杀进程拿不到退出码；于是「旧进程已死、新进程未起」那十几秒里
-  跑的那一轮会把主动重启判成崩溃 → 回滚 + 把武装态一起吃掉，恰好发生在我们最需要它安静的时候。
+  跑的那一轮会把主动重启判成崩溃 → 回滚 + 把看护态一起吃掉，恰好发生在我们最需要它安静的时候。
   调度失败会回滚标记，否则下一次**真崩溃**会被当成正常退出而不救。
-- **假武装零告警**：`arm.mjs` 先写 `arm.json` 再建计划任务，建失败时 `arm.json` 会残留，
-  而 `ownshield_status` 仍报 `ok:true`——「看起来已武装、实际没人盯」比没武装更危险。
+- **假看护零告警**：`arm.mjs` 先写 `arm.json` 再建计划任务，建失败时 `arm.json` 会残留，
+  而 `ownshield_status` 仍报 `ok:true`——「看起来已在看护、实际没人盯」比没看护更危险。
   现在任务创建失败会把 `arm.json` 移入 `failed/` 留档；`status` 增加一致性判定
-  （已武装但任务或启动器缺失 → `ok:false` 并写明原因），`ownshield_status` 在首行打 `⚠`。
-- **重复武装静默覆盖回滚点**：`arm()` 默认拒绝覆盖既有 `arm.json`（返回退出码 3 并说明），
+  （已在看护但任务或启动器缺失 → `ok:false` 并写明原因），`ownshield_status` 在首行打 `⚠`。
+- **重复看护静默覆盖回滚点**：`arm()` 默认拒绝覆盖既有 `arm.json`（返回退出码 3 并说明），
   需显式 `replace: true`；同一 tag 的重复调用按幂等放行。两个会话各自建快照时不再互相顶掉。
 - **恢复后只有通报、没有续跑**：`will.mjs`（遗嘱）与 `resume-prompt.mjs`（`[还魂]` 消息）
   此前只在开发目录、未接入运行期。现在随包分发，`watch.mjs` 恢复成功时若有遗嘱就投递
@@ -51,7 +51,7 @@
   （`ownshield.armed / tag / expectGracefulExit`），不用先去问另一个工具。
 - **主动重启标记没有失效机制**（2026-11-22 真机当场发现并修）：`restart_now` 打完
   `expectGracefulExit` 后，如果看门狗那一轮跑的时候新进程已经起来，`resolveBoot` 会重建 boot、
-  判 `signals=none`，既不走 graceful-exit 也不撤防——标记就永久留在 `arm.json` 里，之后
+  判 `signals=none`，既不走 graceful-exit 也不停止看护——标记就永久留在 `arm.json` 里，之后
   **真崩溃**会被当成正常退出而不救，比不打标记更危险。现在标记带 `expectGracefulExitAt`
   时间戳，只在 10 分钟窗口内算数；看门狗建起新 boot 后主动清除，过期标记也清。
   没写时间戳的标记一律不认（人工声明正常退出请用 `autoGracefulExit: "no-crash-evidence"`）。
@@ -63,6 +63,10 @@
 - **术语统一**：面向用户的措辞由「武装 / 撤防」改为「看护 / 停止看护」。工具名 `ownshield_arm` /
   `ownshield_disarm`、状态文件 `arm.json`、归档目录 `disarm/` 保持不变（`arm`/`disarm` 是标准术语，
   改名会破坏兼容）。
+- **文档补充能力边界**：README 新增「能救什么，不能救什么」一节——能救的五类标注实测时延
+  （崩溃 ≤60 s、挂死 2–3 min、跑不动最长 6 h、cookie ≤1 min、救回约 22 s），救不了的六条明写
+  （未看护一律不救、只回滚 `app.asar`、未知形态三次熔断、哈希闸拒绝回滚、无信号盲区、
+  「原地」其实换的是新进程）。「原地复活」指内核层可回滚的坏，不指任何故障。
 - **多会话改内核时能看到持有者**：`ownshield_status` 与 `restart_status` 显示发起看护的会话，
   被挡住的一方不用猜该等谁。
 

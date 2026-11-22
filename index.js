@@ -111,7 +111,7 @@ export function apply(ctx, config = {}) {
   ownshield.processName = restart.processName
   ownshield.timeZone = restart.timeZone
   injectLoop.timeZone = restart.timeZone
-  // 2.0 合包后的状态桥：restart_now 要知道自愈状态目录，才能在被武装时
+  // 2.0 合包后的状态桥：restart_now 要知道自愈状态目录，才能在看护期间
   // 先声明「这次重启是预期的」，否则看门狗会把它判成崩溃并回滚。
   restart.ownshieldDir = ownshield.ownshieldDir
 
