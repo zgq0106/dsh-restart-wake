@@ -708,6 +708,9 @@ export function normalizeState(raw) {
     lastCheckAt: typeof source.lastCheckAt === 'string' ? source.lastCheckAt : '',
     lastResult: typeof source.lastResult === 'string' ? source.lastResult : '',
     lastSignals: Array.isArray(source.lastSignals) ? source.lastSignals : [],
+    // 熔断挂起态（P2）：必须过白名单，否则每轮都会被清掉，永远评估不到释放条件。
+    suspended: source.suspended === true,
+    suspendedAt: typeof source.suspendedAt === 'string' ? source.suspendedAt : '',
   };
 }
 
@@ -2291,7 +2294,8 @@ export function probeInfra({ dir, crashDir, checkTask = true }) {
   } catch (err) {
     problems.push(`crash 目录不可写: ${err.message}`);
   }
-  if (checkTask) {
+  // 沙箱/演练环境里 schtasks 查询会被管道限制挡掉；显式设 OWNSHIELD_SKIP_INFRA=1 跳过。
+  if (checkTask && String(process.env.OWNSHIELD_SKIP_INFRA || '') !== '1') {
     const r = runCaptured('schtasks.exe', ['/Query', '/TN', 'ownshield-watch'], {
       timeoutMs: 15000,
       tag: 'task',
@@ -2468,6 +2472,37 @@ function runLocked({ opts, paths, arm, armId, now, t0 }) {
     return { exitCode: EXIT.OK, output: base };
   }
 
+  // 挂起态：不再自动修复，但每轮都评估释放条件。
+  // 必须放在「无信号」分支之前——模型修好的表现恰恰是无信号 + 纸条重新出现成功。
+  if (state.suspended) {
+    const since = Date.parse(String(state.suspendedAt ?? '')) || 0;
+    const post = readActivitySummary(paths, now, { since });
+    // 演练/自检：dry-run 只报结论，不改状态、不撤防。
+    if (opts.dryRun) {
+      const wouldRelease = shouldReleaseSuspended(state, post);
+      base.decision = {
+        ...decision,
+        action: wouldRelease ? 'would-release' : 'suspended',
+        reason: wouldRelease ? '纸条已转绿，正式运行会停止看护' : '挂起中，等模型恢复',
+      };
+      return { exitCode: EXIT.OK, output: { ...base, dryRun: true, suspended: true } };
+    }
+    if (shouldReleaseSuspended(state, post)) {
+      const dest = disarm(paths, 'recovered-after-suspend');
+      delete state.suspended;
+      delete state.suspendedAt;
+      state.lastResult = 'recovered';
+      writeJsonAtomic(paths.state, state);
+      appendLog(paths, { event: 'suspend-release', arm: arm.tag, result: 'recovered', disarm: dest });
+      base.decision = { ...decision, action: 'disarm', reason: '模型已恢复工作，自动停止看护' };
+      return { exitCode: EXIT.OK, output: { ...base, released: true } };
+    }
+    state.lastCheckAt = iso(now);
+    writeJsonAtomic(paths.state, state);
+    base.decision = { ...decision, action: 'suspended', reason: '已熔断挂起，等待模型恢复工作' };
+    return { exitCode: EXIT.NEEDS_HUMAN, output: { ...base, suspended: true } };
+  }
+
   // ---- 无信号：观察/健康 ----
   if (decision.action === 'none') {
     state.lastCheckAt = iso(now);
@@ -2551,26 +2586,6 @@ function runLocked({ opts, paths, arm, armId, now, t0 }) {
       state.levelsUsed.L1 = true;
       writeJsonAtomic(paths.state, state);
     }
-  }
-
-  // 挂起态：不再自动修复，但继续观察。模型恢复工作（纸条出现成功）就自动停止看护。
-  if (state.suspended) {
-    const since = Date.parse(String(state.suspendedAt ?? '')) || 0;
-    const post = readActivitySummary(paths, now, { since });
-    if (shouldReleaseSuspended(state, post)) {
-      const dest = disarm(paths, 'recovered-after-suspend');
-      delete state.suspended;
-      delete state.suspendedAt;
-      state.lastResult = 'recovered';
-      writeJsonAtomic(paths.state, state);
-      appendLog(paths, { event: 'suspend-release', arm: arm.tag, result: 'recovered', disarm: dest });
-      base.decision = { ...decision, action: 'disarm', reason: '模型已恢复工作，自动停止看护' };
-      return { exitCode: EXIT.OK, output: { ...base, released: true } };
-    }
-    state.lastCheckAt = iso(now);
-    writeJsonAtomic(paths.state, state);
-    base.decision = { ...decision, action: 'suspended', reason: '已熔断挂起，等待模型恢复工作' };
-    return { exitCode: EXIT.NEEDS_HUMAN, output: { ...base, suspended: true } };
   }
 
   // ---- 恢复 ----

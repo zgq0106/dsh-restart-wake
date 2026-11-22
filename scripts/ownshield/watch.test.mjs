@@ -421,6 +421,14 @@ test('activity-failed：窗口内全是失败且 ≥3 条才报警；有成功�
   assert.equal(readActivitySignal({ activity: path.join(dir, 'nope.json') }, now), null);
 });
 
+test('normalizeState 保留挂起态字段（否则永远评估不到释放条件）', () => {
+  const state = normalizeState({ suspended: true, suspendedAt: '2026-11-22T10:00:00.000Z' });
+  assert.equal(state.suspended, true);
+  assert.equal(state.suspendedAt, '2026-11-22T10:00:00.000Z');
+  assert.equal(normalizeState({}).suspended, false);
+  assert.equal(normalizeState(null).suspendedAt, '');
+});
+
 test('readActivitySummary：since 之前的旧账不计；shouldReleaseSuspended 只在纸条转绿时释放', () => {
   const dir = tmpDir('summary');
   const file = path.join(dir, 'activity.json');
