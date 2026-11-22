@@ -10,13 +10,15 @@ One package, eleven Agent tools, one set of startup hooks: restart & wake, core 
 - Dependencies: none (Node built-ins only)
 - DSH: requires **≥ `0.2.2-alpha.2`**; tested on `0.2.2-rc.2`
 
-> ## ⚠️ Upgrading from 0.1.x: uninstall the two old packages first
+> ## Upgrading from 0.1.x to 2.x: just update, nothing to uninstall
 >
-> 2.0.0 merges the former **`dsh-ownshield`** (probes, snapshots, arming) and **`dsh-ownshield-inject`** (failure re-injection, probe gate, request watch).
+> 2.x adds self-healing and re-injection inside the same package: the tool count goes from 6 to 11, the `dsh.profile.bundles` row stays as it is, and the `~/.dsh/ownshield` state directory is reused.
 >
-> Steps: ① remove `dsh-ownshield` and `dsh-ownshield-inject` from the profile's `dsh.profile.bundles`; ② drop their two `dependencies` entries; ③ install or update this package; ④ restart Harness.
+> One exception: 2.0 merged in two local experiment packages — **`dsh-ownshield`** (probes, snapshots, arming) and **`dsh-ownshield-inject`** (failure re-injection, probe gate, request watch) — **neither was ever published**. Only if you installed them by hand (e.g. a `link:` from a source checkout) do you need to remove them first: ① remove both entries from `dsh.profile.bundles`; ② drop their two `dependencies` entries; ③ install or update this package; ④ restart Harness.
 >
 > **Installing without uninstalling registers each `ownshield_*` tool twice**, which produces duplicate-identifier errors and can fail the whole tool group. Tool names and behaviour are unchanged in 2.0 — only the provider changed.
+>
+> **2.0.0 → 2.1.0 needs no uninstall**, just update. 2.1 only adds capability and keeps tool names; the single behaviour change is that `ownshield_probe` no longer creates a session by default — pass `deep: true` to verify that sessions can actually run.
 
 ---
 

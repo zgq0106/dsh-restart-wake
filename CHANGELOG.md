@@ -22,9 +22,11 @@
 
 **破坏性变更（升级前必读）**
 
-- 本包**取代** `dsh-ownshield`（0.1.0）与 `dsh-ownshield-inject`（0.1.0）。
-  升级必须**先卸掉这两个旧包**，并清掉 profile `cordis.patch.yml` 里它们各自的 `insert` 行；
-  否则同一个工具会被注册两次（重名注册的后果取决于 DSH 的注册实现），自愈提示也会出现两遍。
+- 本包**取代** `dsh-ownshield`（0.1.0）与 `dsh-ownshield-inject`（0.1.0）——这两个包是本地实验包，
+  **从未公开发布**；公开用户从 v0.1.6 直升 2.x 时 profile 里没有它们，直接更新即可，不存在合并问题。
+  只有在本机手工装过旧包时（例如从源码目录 `link:` 进去）才需要**先卸掉它们**，并清掉 profile
+  `cordis.patch.yml` 里各自的 `insert` 行；否则同一个工具会被注册两次（重名注册的后果取决于 DSH
+  的注册实现），自愈提示也会出现两遍。
 - 配置字段改名（仅回注侧，语义冲突）：`pendingDir` → `injectDir`，`logPath` → `injectLogPath`。
   状态目录不变，仍是 `~/.dsh/ownshield`，老用户历史文件原地可读。
 - 提示开关拆成两个：`restartPromptEnabled` / `ownshieldPromptEnabled`（都缺省 `true`）。

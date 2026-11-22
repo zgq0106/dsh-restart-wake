@@ -78,7 +78,7 @@ git tag v2.1.0
 git push origin v2.1.0
 ```
 
-网页 → Releases → Draft a new release → 选 `v2.1.0` → 描述抄 `CHANGELOG.md` 的 2.1.0 段；**2.0.0 的破坏性变更（取代 dsh-ownshield 与 dsh-ownshield-inject）要在正文里再提醒一次**——从 0.1.x 直升的人会跳过中间的 release → Publish。
+网页 → Releases → Draft a new release → 选 `v2.1.0` → 描述抄 `CHANGELOG.md` 的 2.1.0 段。**2.0.0 合并的 `dsh-ownshield` / `dsh-ownshield-inject` 从未公开发布**，公开用户从 v0.1.6 直升不受影响；正文里说明「新增自愈能力、工具 6 → 11」即可，不要写「先卸旧包」的步骤。
 
 网页上传路线等价做法：Draft a new release → Choose a tag 输入 `v2.1.0` → Create new tag on publish。
 
@@ -94,9 +94,11 @@ dsh plugin --profile desktop add github:zgq0106/dsh-restart-wake
 4. 调用 `restart_status`，应报出可执行文件路径与脚本状态；
 5. 调用 `ownshield_status`，应报出看护状态、计划任务是否存在、快照库路径。
 
-### 从 dsh-ownshield 迁移的真机验证
+### （仅本机开发）从 dsh-ownshield 迁移的真机验证
 
-1. 在已装 `dsh-ownshield` 的 profile 里，先按 README 首屏卸掉 `dsh-ownshield` 与 `dsh-ownshield-inject`；
+这两个旧包从未公开发布，这一节只是开发者本机的回归验证，不是用户升级路径：
+
+1. 在已装 `dsh-ownshield` 的 profile 里，先按 README 首屏的例外注记卸掉 `dsh-ownshield` 与 `dsh-ownshield-inject`；
 2. 装本包并重启；
 3. 启动日志里**不应出现**重复工具标识告警；
 4. 注入段应只有一段，含「重启与唤醒」「本体自愈」两个小节。
@@ -119,9 +121,9 @@ dsh plugin --profile desktop add github:zgq0106/dsh-restart-wake
 - [ ] `package.json` 的 `name` 与仓库名一致
 - [ ] `version` 为 `2.1.0`，`CHANGELOG.md` 顶部有对应段落
 - [ ] LICENSE MIT，`license` 字段也是 MIT
-- [ ] `v2.1.0` tag 与 Release 可打开，Release 描述含 2.0.0 的升级须知
+- [ ] `v2.1.0` tag 与 Release 可打开，Release 描述说明 2.0 起合入自愈能力（旧实验包从未公开发布，用户无需卸包）
 - [ ] `dsh-plugin` 等 topics 已设
 - [ ] 全新 profile（或另一台机器）实测安装 + 重启后 11 个工具可见
-- [ ] 已有 `dsh-ownshield` 的 profile 按升级须知操作后无重复工具告警
+- [ ] （本机）手工装过 `dsh-ownshield` 的 profile 按首屏例外注记卸掉后无重复工具告警
 - [ ] README 里没有本机私有路径、内网地址、凭据
 - [ ] `scripts/ownshield/` 里没有指向开发工作区的绝对路径

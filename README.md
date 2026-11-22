@@ -10,11 +10,11 @@
 - 依赖：无（只用 Node 内置模块）
 - DSH 版本：要求 **≥ `0.2.2-alpha.2`**；`0.2.2-rc.2` 实测
 
-> ## ⚠️ 从 0.1.x 升级：必须先卸两个旧包
+> ## 从 0.1.x 升级到 2.x：直接更新，不需要卸任何东西
 >
-> 2.0.0 合并了原来的 **`dsh-ownshield`**（探针、快照、看护）与 **`dsh-ownshield-inject`**（故障回注、探针闸、request-watch）。
+> 2.x 是在同一个包里补上自愈与回注能力：工具从 6 个增加到 11 个，profile 的 `dsh.profile.bundles` 里那一行保持不动，`~/.dsh/ownshield` 状态目录由本包沿用。
 >
-> 升级步骤：① 从 profile 的 `dsh.profile.bundles` 删掉 `dsh-ownshield` 和 `dsh-ownshield-inject`；② 从 `dependencies` 删掉对应的两条；③ 再装 / 更新本包；④ 重启 Harness。
+> 一处例外：2.0 曾把两个**从未公开发布**的本地实验包 `dsh-ownshield`（探针、快照、看护）与 `dsh-ownshield-inject`（故障回注、探针闸、request-watch）并入本包。只有你手工装过它们（例如从源码目录 `link:` 进去）时才需要先卸：① 从 `dsh.profile.bundles` 删掉这两条；② 从 `dependencies` 删掉对应两条；③ 再更新本包；④ 重启 Harness。
 >
 > **不卸就装会导致 `ownshield_*` 五个工具各注册两遍**，启动日志报重复标识，整组工具可能加载失败。工具名与行为在 2.0 没有变——变的是它们现在由同一个包提供。
 >
@@ -106,7 +106,7 @@ pnpm 不认 `github:` 前缀时用完整地址：
 dsh plugin --profile desktop add "git+https://github.com/zgq0106/dsh-restart-wake.git"
 ```
 
-从 0.1.x 升级请先看首屏的升级须知；从 `dsh-ownshield` 迁移时，旧的状态目录 `~/.dsh/ownshield` **不用动**——2.0 继续读它。
+从 0.1.x 升级直接更新即可（见首屏）。旧的状态目录 `~/.dsh/ownshield` **不用动**——2.x 继续读它；手工装过内部实验包的，按首屏注记先把那两条 `bundles` / `dependencies` 记录删掉。
 
 ### 安装后自检
 
@@ -476,7 +476,7 @@ Remove-Item -Recurse -Force "$env:USERPROFILE\.dsh\restart-wake"
 | 快照库在旧路径 | `ownshield_status` 的告警行 | 把快照目录搬到 `~/.dsh/ownshield/snapshots`（或设 `OWNSHIELD_SNAPSHOTS`） |
 | 看护被拒（退出码 3） | problems 逐项：快照不存在 / 快照闸拒绝 / 没有 DSH 主进程 / 找不到 Node | 逐项修；快照闸拒绝通常意味着 DSH 升级过，旧快照回滚会降级，先重建快照 |
 | 连续失败三次后停手 | `~/.dsh/ownshield/needs-human.json` | 这是设计（熔断交人）：读文件里的原因，人工处理后再重新启动看护 |
-| 启动日志报重复工具标识 | profile 里是否还留着 `dsh-ownshield` / `dsh-ownshield-inject` | 按首屏升级须知卸掉两个旧包再重启 |
+| 启动日志报重复工具标识 | profile 里是否留着两个内部实验包 `dsh-ownshield` / `dsh-ownshield-inject`（从未公开发布） | 按首屏注记删掉两条 `bundles` / `dependencies` 记录再重启 |
 
 ---
 
