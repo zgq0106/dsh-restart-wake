@@ -2,6 +2,10 @@
 
 ## 未发布
 
+- **纸条即探针：用真实工作痕迹判定「跑不动」**（2026-11-22）：新增 `lib/activity-watch.js`——订阅每个 agent 的 `session/event`（`tool/result`、`turn/end`、`assistant/message`）与 `agent/request-error`，把最近 50 条成功/失败落到 `~/.dsh/ownshield/activity.json`。看门狗新增硬信号 `activity-failed`：**窗口内 ≥3 次失败且 0 次成功**才报警；有一次成功就算能用，零流量不下结论（空闲不等于坏了）。
+  这样做的好处：测的是用户真实在用的预设与工具集、零额外会话、零额外 token、用户完全无感；模型一出问题当场就有记录，不用等探针窗口。主动探针因此从「主检测」降为「手动/兜底」。
+  新增测试：`test/activity-watch.test.mjs`（6 项，判定与截断）、`watch.test.mjs` 增加 `activity-failed` 三项边界。
+- **探针用完即清**（2026-11-22）：探针会话探测完调 `workspaceRegistry.archiveSession(..., { stopActivity: true })` 归档（侧栏默认不显示），并删除 `mkdtemp` 的临时目录；`probe-*.json` 里的 `cleanup` 字段记录实况。定时探针改为 Host 直调，不再往用户会话投递自检指令。
 - **L3：profile 层还原**（2026-11-22）：看护链在 L2 之后增加一级——只还原 `cordis.patch.yml`、预设目录、`package.json` 与 `link:` 关系，**不碰 `app.asar`**。
   `snapshot.mjs` 新增 `--profile-only`（隐含 `--with-profile`）；`arm.mjs` 检测到快照带 profile 层时自动把 `arm.json` 的 `maxLevel` 提到 3 并写 `profileTag`；L3 跳过 asar 哈希闸（它本来就不动 asar）。
   不包含 `node_modules` 实体、会话、记忆、凭据——这几类不进任何快照。

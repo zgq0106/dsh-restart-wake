@@ -325,11 +325,44 @@ export const DEFAULTS = {
   heartbeatStaleMs: 90_000,
 };
 
+/**
+ * 读插件侧采集的真实事件（`activity.json`），把「纸条」变成信号。
+ *
+ * 判定只看两件事：窗口内**有没有一次成功**、失败是否成串。
+ * 有成功 = 模型确实在用且能用，单次工具报错不算本体坏；
+ * 全是失败且 ≥3 条 = 纸条在报警（例如工具集装配坏了、每调必抛）。
+ * 没流量时不下结论——空闲不等于坏了，那是静态检查的事。
+ */
+export function readActivitySignal(paths, now = Date.now(), { windowMs = 10 * 60 * 1000, threshold = 3 } = {}) {
+  let raw = null;
+  try {
+    raw = JSON.parse(fs.readFileSync(paths.activity, 'utf8').replace(/^\uFEFF/, ''));
+  } catch {
+    return null;
+  }
+  const rows = (Array.isArray(raw?.recent) ? raw.recent : []).filter((row) => {
+    const at = Date.parse(String(row?.at ?? ''));
+    return Number.isFinite(at) && now - at <= windowMs;
+  });
+  const failures = rows.filter((row) => row?.ok === false);
+  const successes = rows.filter((row) => row?.ok === true);
+  if (successes.length > 0) return null;
+  if (failures.length < threshold) return null;
+  const last = failures[failures.length - 1];
+  return {
+    verdict: 'failing',
+    successes: 0,
+    failures: failures.length,
+    detail: `最近 ${Math.round(windowMs / 60000)} 分钟内 ${failures.length} 次操作失败、0 次成功（最后一次: ${last?.text || 'unknown'}）`,
+  };
+}
+
 export const EXIT = { OK: 0, ERROR: 2, NEEDS_HUMAN: 3, RECOVERED: 4 };
 
-const HARD_SIGNALS = new Set(['process-gone', 'new-crash-log', 'probe-failure', 'cookie-stale']);
+const HARD_SIGNALS = new Set(['process-gone', 'new-crash-log', 'probe-failure', 'cookie-stale', 'activity-failed']);
 const SIGNAL_LABEL = {
   'process-gone': '进程在宽限期内消失',
+  'activity-failed': '真实操作连续失败且无一次成功（纸条在报警）',
   'new-crash-log': '出现新 crash log',
   'no-heartbeat': '宽限期内无心跳',
   'probe-failure': '探针结构性失败',
@@ -536,6 +569,7 @@ function resolvePaths(opts) {
     log: path.join(ownshield, 'recovery.log'),
     needsHuman: path.join(ownshield, 'needs-human.json'),
     recovered: path.join(ownshield, 'recovered.json'),
+    activity: path.join(ownshield, 'activity.json'),
     bootsDir: path.join(ownshield, 'boots'),
     disarmDir: path.join(ownshield, 'disarm'),
     crashDir,
@@ -1127,6 +1161,7 @@ export function evaluateSignals({
    * 传函数而不是值：进程活着时一次 PowerShell 都不该跑。
    */
   exitEvidence,
+  activity,
 }) {
   const signals = [];
   if (!boot || !procsOk) return signals;
@@ -1253,6 +1288,15 @@ export function evaluateSignals({
         probe: staleProbe.name,
       });
     }
+  }
+
+  // 真实流量的「纸条」：模型在工作里留下的成功/失败记录，比造一个 probe 会话更可信。
+  if (activity && activity.verdict === 'failing') {
+    signals.push({
+      type: 'activity-failed',
+      hard: true,
+      detail: activity.detail,
+    });
   }
 
   return signals;
@@ -2271,6 +2315,8 @@ function runLocked({ opts, paths, arm, armId, now, t0 }) {
         crash,
         heartbeats,
         probes,
+        // 「纸条即探针」：插件采集的真实操作记录（成功/失败），成串失败且零成功才报警。
+        activity: readActivitySignal(paths, now),
         // A3：只有进程真的消失时才去查事件日志（一次 PowerShell 约 0.3-1s）。
         exitEvidence:
           arm.crashEventQuery === false

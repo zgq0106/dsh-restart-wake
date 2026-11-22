@@ -26,6 +26,7 @@ import { resolveConfig } from './lib/config.js'
 import { resolveOwnshieldConfig } from './lib/config-ownshield.js'
 import { resolveInjectConfig } from './lib/config-inject.js'
 import { startInjectLoop } from './lib/inject.js'
+import { startActivityWatch } from './lib/activity-watch.js'
 import { runProbe } from './lib/probe.js'
 import { runProbeGate } from './lib/probe-gate.js'
 import { registerPrompt } from './lib/prompt.js'
@@ -145,6 +146,8 @@ export function apply(ctx, config = {}) {
   block('唤醒循环', () => startWakeLoop(ctx, restart))
   block('故障回注', () => startInjectLoop(ctx, injectLoop))
   block('探针闸', () => startProbeGate(ctx, injectLoop))
+  // 纸条即探针：采集模型真实工作中的工具/轮次/请求结果，供看门狗判「跑不动」。
+  block('真实流量采集', () => startActivityWatch(ctx, { dir: injectLoop.injectDir }))
   block('请求失败注入', () => startRequestWatch(ctx, injectLoop))
   block('注入日志', () => logArmed(injectLoop))
 

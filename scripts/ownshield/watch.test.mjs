@@ -22,6 +22,7 @@ import {
   evaluateSignals,
   nextLevel,
   levelTag,
+  readActivitySignal,
   normalizeArm,
   normalizeBoot,
   normalizeState,
@@ -383,6 +384,39 @@ test('maxLevel=3：L1 → L2 → L3，L3 用 profileTag，缺省退回 arm.tag',
   assert.equal(levelTag(arm, 'L3'), 'snap-with-profile');
   assert.equal(levelTag({ ...arm, profileTag: undefined }, 'L3'), arm.tag);
   assert.equal(levelTag(arm, 'L2'), arm.baselineTag);
+});
+
+test('activity-failed：窗口内全是失败且 ≥3 条才报警；有成功或零星失败都不报', () => {
+  const dir = tmpDir('activity');
+  const file = path.join(dir, 'activity.json');
+  const now = T0;
+  const rows = (n, ok) =>
+    Array.from({ length: n }, (_, i) => ({
+      kind: 'tool',
+      ok,
+      text: 'pwsh',
+      at: new Date(now - i * 1000).toISOString(),
+    }));
+  const paths = { activity: file };
+
+  fs.writeFileSync(file, JSON.stringify({ version: 1, recent: rows(3, false) }));
+  const sig = readActivitySignal(paths, now);
+  assert.equal(sig?.verdict, 'failing');
+  assert.match(sig.detail, /3 次操作失败/);
+
+  fs.writeFileSync(
+    file,
+    JSON.stringify({
+      version: 1,
+      recent: [...rows(3, false), { kind: 'turn', ok: true, text: '', at: new Date(now).toISOString() }],
+    }),
+  );
+  assert.equal(readActivitySignal(paths, now), null, '有一次成功就不算坏');
+
+  fs.writeFileSync(file, JSON.stringify({ version: 1, recent: rows(2, false) }));
+  assert.equal(readActivitySignal(paths, now), null, '零星失败不下结论');
+
+  assert.equal(readActivitySignal({ activity: path.join(dir, 'nope.json') }, now), null);
 });
 
 test('planLevels 给出 L1 → L2 → L2 的只读计划', () => {
