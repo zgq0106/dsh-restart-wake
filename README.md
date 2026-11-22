@@ -109,9 +109,9 @@ dsh plugin --profile desktop add "git+https://github.com/zgq0106/dsh-restart-wak
 |---|---|
 | `ownshield_probe` | 七项检查，只检测不修复；结果写到 `~/.dsh/ownshield/probe-<时间戳>.json` |
 | `ownshield_snapshot` | 给 `app.asar` 建内容寻址快照，返回 tag 与占用 |
-| `ownshield_arm` | 检查快照存在 / 快照闸 / DSH 进程 / Node 可执行，写 `arm.json` 并幂等创建每分钟一次的计划任务 |
+| `ownshield_arm` | 检查快照存在 / 快照闸 / DSH 进程 / Node 可执行，写 `arm.json` 并幂等创建每分钟一次的计划任务；**已武装时默认拒绝覆盖回滚点**，要换快照请显式传 `replace: true`（同一 tag 重复调用按幂等放行） |
 | `ownshield_disarm` | 撤防：`arm.json` 归档到 `disarm/`，不删计划任务（未武装时它仍跑 cookie 守卫） |
-| `ownshield_status` | 只读自检：武装状态、任务、快照库解析路径、最近恢复结论、熔断交接文件 |
+| `ownshield_status` | 只读自检：武装状态、任务、快照库解析路径、最近恢复结论、熔断交接文件；**武装与计划任务/启动器不一致时报 `ok:false` 并打 `⚠`**（防「看起来已武装、实际没人盯」） |
 
 调用方不需要手填会话 id：工具从执行上下文 `exec.agent.id` 自动读取。
 
@@ -140,6 +140,19 @@ dsh plugin --profile desktop add "git+https://github.com/zgq0106/dsh-restart-wak
 3. 改内核
 4. 改崩了就等看门狗：自动回滚 → 重启 → 校验 → 通报原会话，然后自动撤防
 ```
+
+### 重启 × 自愈：两条链怎么协同（2.0 合包后）
+
+合包不只是省一次安装——两条链现在能互相看见：
+
+- **武装态下正常重启**：`restart_now` 会在调度前给 `arm.json` 打 `expectGracefulExit`。
+  看门狗看到进程消失会按「正常退出」处理：不拉起重启、直接撤防，不会把这次重启判成崩溃
+  去回滚。`restart_status` 的 `ownshield` 字段直接显示当前是否 armed、是否已标记。
+- **恢复后的续跑**：看门狗救回来时，如果目标会话写过遗嘱（`will.mjs`），投递给它的是
+  `[还魂]` 消息——中断时刻、中断前的目标、已完成、下一步原计划、工具集指纹是否变更；
+  没有遗嘱就退回一句事后通报，**不编造**续跑内容。
+- **武装态的假象**：`arm.json` 在、计划任务不在时，`ownshield_status` 报 `ok:false` 并在
+  首行打 `⚠`。看到「武装：是」却感觉没人管时，先看这一行。
 
 ---
 

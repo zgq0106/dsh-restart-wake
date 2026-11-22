@@ -78,6 +78,7 @@ import {
   recordRolledBack as debrideRecordRolledBack,
   runProbeCommand as debrideRunProbeCommand,
 } from './debride.mjs';
+import { renderResume } from './resume-prompt.mjs';
 
 const SELF = fileURLToPath(import.meta.url);
 const SCRIPT_DIR = fs.realpathSync(path.dirname(SELF));
@@ -1718,10 +1719,30 @@ export function notifyNeedsHuman({ paths, arm, payload, now = Date.now() }) {
  *   2. 没有会话 / 写失败 → 落 `recovered.md` 人话摘要。
  * 通知只是「多喊一声」，任何失败都不影响恢复结论与退出码。
  */
-export function notifyRecovered({ paths, arm, attempt, attempts = [], now = Date.now() }) {
+export function notifyRecovered({ paths, arm, attempt, attempts = [], signals = [], now = Date.now() }) {
   const stamp = stampName(now);
   const level = attempt?.level ?? '';
   const verify = attempt?.verify ?? null;
+  const sessionId = typeof arm?.notifySessionId === 'string' ? arm.notifySessionId.trim() : '';
+  // 有遗嘱就用 [还魂] 消息续跑（目标 / 已完成 / 下一步 / 工具指纹）；没有就退回事后通报。
+  // 遗嘱缺了就如实降级，绝不编造续跑内容——那比没有更坏。
+  const signalText = (Array.isArray(signals) ? signals : [])
+    .map((signal) => signal?.type)
+    .filter(Boolean)
+    .join('+');
+  let resumeText = '';
+  if (sessionId !== '') {
+    try {
+      resumeText = renderResume(sessionId, {
+        stateDir: paths.ownshield,
+        reason: `${level || '自动'} 恢复（信号 ${signalText || '未记录'}，校验 ${verify?.reason ?? '未记录'}）`,
+        interruptedAt: attempt?.at,
+      });
+    } catch {
+      resumeText = '';
+    }
+  }
+  const recoveryFacts = `ownshield 已自动恢复：回滚快照 ${attempt?.tag ?? '?'}，重启 pid ${attempt?.restart?.pid ?? '?'}，校验 ${verify?.reason ?? '未记录'}。`;
   const note = {
     level: 'recovered',
     phase: 'auto-recovery',
@@ -1737,9 +1758,11 @@ export function notifyRecovered({ paths, arm, attempt, attempts = [], now = Date
       `校验结论：${verify?.reason ?? '未记录'}${verify?.detail ? `（${verify.detail}）` : ''}`,
       `累计尝试：${attempts.length} 次；arm.json 已移入 disarm/`,
     ],
-    prompt: 'ownshield 已自动恢复：这是一条事后通报，不需要你做任何处置。手上未完成的工作可以接着做。',
+    prompt:
+      resumeText !== ''
+        ? `${resumeText}\n\n（${recoveryFacts}不需要你做处置，确认上述三条后接着做。）`
+        : 'ownshield 已自动恢复：这是一条事后通报，不需要你做任何处置。手上未完成的工作可以接着做。',
   };
-  const sessionId = typeof arm?.notifySessionId === 'string' ? arm.notifySessionId.trim() : '';
   if (sessionId) {
     const injectFile = path.join(paths.ownshield, `inject-pending-recovered-${stamp}.json`);
     try {
@@ -2662,7 +2685,7 @@ function runLocked({ opts, paths, arm, armId, now, t0 }) {
       });
       // 恢复成功也要有人知道：通知失败绝不影响恢复结论。
       try {
-        const notify = notifyRecovered({ paths, arm, attempt, attempts: state.attempts });
+        const notify = notifyRecovered({ paths, arm, attempt, attempts: state.attempts, signals });
         appendLog(paths, {
           event: 'notify',
           arm: arm.tag,

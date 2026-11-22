@@ -617,11 +617,13 @@ function parseArgs(argv) {
     processName: '',
     nodePath: '',
     noTask: false,
+    replace: false,
   };
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
     if (arg === '--dry-run' || arg === '-n') opts.dryRun = true;
     else if (arg === '--no-task') opts.noTask = true;
+    else if (arg === '--replace') opts.replace = true;
     else if (arg === '--json') opts.json = true;
     else if (arg === '--help' || arg === '-h') opts.help = true;
     else if (arg === '--tag') opts.tag = argv[++i] ?? '';
@@ -657,6 +659,8 @@ function usage() {
   --task-name    计划任务名（默认 ownshield-watch）
   --node-path    指定 node 可执行文件（等价 config.nodePath；默认运行时探测）
   --no-task      只写 arm.json 与 <stateDir>/watch-silent.vbs，跳过 schtasks（沙盘/验收用）
+  --replace      已处于武装状态时强制覆盖既有 arm.json（默认拒绝：回滚点是安全资产，
+                 覆盖一次就少一个已知可用状态；同一 tag 的重复调用按幂等放行）
   --json         机器可读输出
 
 武装前置检查（任一不过即拒绝，退出码 3，不写任何文件）:
@@ -683,6 +687,34 @@ export function arm(opts) {
   if (tag === '') {
     checks.push({ name: 'tag', ok: false, detail: '缺少 --tag（快照 tag 不能为空）' });
     problems.push('缺少 --tag（快照 tag 不能为空）');
+  }
+
+  // 已武装时默认拒绝覆盖：回滚点是安全资产，覆盖一次就少一个已知可用状态。
+  // 同一 tag 的重复调用按幂等放行（重试不该被拦），不同 tag 必须显式 replace。
+  const existingRead = readJsonSafe(armFile);
+  const existing =
+    existingRead.exists && existingRead.value && typeof existingRead.value === 'object' ? existingRead.value : null;
+  const existingTag = existing && typeof existing.tag === 'string' ? existing.tag : '';
+  const existingArmedAt = existing && typeof existing.armedAt === 'string' ? existing.armedAt : '';
+  const sameTag = existing !== null && existingTag === tag && tag !== '';
+  if (existing !== null && !sameTag && opts.replace !== true) {
+    checks.push({
+      name: 'already-armed',
+      ok: false,
+      detail: `已处于武装状态：tag ${existingTag || '(空)'}，armedAt ${existingArmedAt || '(未记录)'}`,
+    });
+    problems.push(
+      `已处于武装状态（tag ${existingTag || '(空)'}，armedAt ${existingArmedAt || '(未记录)'}）：` +
+        '继续会覆盖回滚点。先 ownshield_disarm，或确认要覆盖再传 replace=true。',
+    );
+  } else if (existing !== null) {
+    checks.push({
+      name: 'already-armed',
+      ok: true,
+      detail: sameTag
+        ? `重复武装同一快照「${tag}」，按幂等处理`
+        : `覆盖既有武装（tag ${existingTag || '(空)'} → ${tag}，replace=true）`,
+    });
   }
 
   const snapshots = resolveSnapshotsDir();
@@ -836,15 +868,56 @@ export function arm(opts) {
     const detail = `计划任务创建失败（schtasks 退出码 ${created.error ? -1 : created.status}）`;
     problems.push(detail);
     checks.push({ name: 'task-create', ok: false, detail });
+    const moved = quarantineArm(armFile, 'task-create-failed');
+    base.armJsonWritten = false;
+    base.armJsonRolledBack = moved;
+    checks.push({
+      name: 'arm-rollback',
+      ok: moved !== '',
+      detail:
+        moved !== ''
+          ? `arm.json 已移入 failed/（没有计划任务就不保留武装态）：${moved}`
+          : 'arm.json 回滚失败——请手动 ownshield_disarm 后重试',
+    });
     return { exitCode: EXIT.ERROR, output: { ok: false, ...base } };
   }
   checks.push({ name: 'task-create', ok: true, detail: `计划任务「${taskName}」已创建或覆盖（幂等）` });
   if (!base.task.exists) {
     const detail = `计划任务「${taskName}」创建后查询不到`;
     problems.push(detail);
+    checks.push({ name: 'task-create', ok: false, detail });
+    const moved = quarantineArm(armFile, 'task-missing');
+    base.armJsonWritten = false;
+    base.armJsonRolledBack = moved;
+    checks.push({
+      name: 'arm-rollback',
+      ok: moved !== '',
+      detail:
+        moved !== ''
+          ? `arm.json 已移入 failed/（计划任务查不到就不保留武装态）：${moved}`
+          : 'arm.json 回滚失败——请手动 ownshield_disarm 后重试',
+    });
     return { exitCode: EXIT.ERROR, output: { ok: false, ...base } };
   }
   return { exitCode: EXIT.OK, output: { ok: true, ...base } };
+}
+
+/**
+ * 把 arm.json 移入 failed/（留档，绝不删除）。
+ * 用于「武装写到一半失败」的路径：没有计划任务就没有值守，留着 arm.json 只会制造
+ * 「看起来已武装、实际上没人盯」的假状态——那比没武装更危险。
+ */
+function quarantineArm(armFile, reason) {
+  try {
+    if (!fs.existsSync(armFile)) return '';
+    const dir = path.join(path.dirname(armFile), 'failed');
+    fs.mkdirSync(dir, { recursive: true });
+    const target = uniquePath(path.join(dir, `arm-${stampName(Date.now())}-${reason}.json`));
+    fs.renameSync(armFile, target);
+    return target;
+  } catch {
+    return '';
+  }
 }
 
 /** disarm 子命令：移动 arm.json，不删除计划任务。 */
@@ -918,20 +991,35 @@ export function status(opts) {
   const launcherPath = path.join(stateDir, LAUNCHER_FILENAME);
   const logs = resolveLogDir();
   const disk = diskFreeInfo([stateDir, logs.dir]);
+  const taskExists = queryTaskExists(taskName);
+  const launcherExists = fs.existsSync(launcherPath);
+  // 一致性：armed 只代表 arm.json 在，不代表有人值守。两者不一致必须报出来——
+  // 「看起来已武装、实际零值守」比没武装更危险，会让人放心地不设防。
+  const problems = [];
+  if (armed && !taskExists) {
+    problems.push(
+      `已武装但计划任务「${taskName}」不存在：看门狗不会运行，等于没武装。重跑 ownshield_arm，或先 ownshield_disarm。`,
+    );
+  }
+  if (armed && !launcherExists) {
+    problems.push(`已武装但启动器缺失：${launcherPath}。看门狗无法被拉起，重跑 ownshield_arm。`);
+  }
   return {
     exitCode: EXIT.OK,
     output: {
-      ok: true,
+      ok: problems.length === 0,
+      healthy: problems.length === 0,
+      problems,
       armed,
       tag,
       armedAt,
       stateDir,
       armJson: armFile,
       armError: read.error,
-      task: { name: taskName, exists: queryTaskExists(taskName) },
+      task: { name: taskName, exists: taskExists },
       launcher: {
         path: typeof raw.launcherPath === 'string' && raw.launcherPath ? raw.launcherPath : launcherPath,
-        exists: fs.existsSync(launcherPath),
+        exists: launcherExists,
       },
       node: { ok: node.ok, path: node.path, source: node.source, error: node.error },
       exe: resolveInstalledExe(opts),
