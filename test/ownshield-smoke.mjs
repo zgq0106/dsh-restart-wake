@@ -246,6 +246,8 @@ try {
     }
     assert.ok(registered[0].output.schema.required.includes('checks'))
     assert.ok(registered[0].output.schema.required.includes('path'))
+    // cleanup 必须声明在 output.schema 里：漏了会被 DSH 的 additionalProperties 校验整单拒绝。
+    assert.ok(registered[0].output.schema.properties.cleanup, '探针输出必须声明 cleanup')
   })
 
   /* 默认静态：不建会话 */
