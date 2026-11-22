@@ -15,7 +15,7 @@ npm pack --dry-run --json --cache <tmp>\npm-cache
 
 ### 2.1.0 额外的发布前核对
 
-- [ ] `scripts/ownshield/` 的 7 个文件与开发目录 `tools/ownshield/` 同名文件 **sha256 逐个一致**
+- [ ] `node tools/sync-ownshield-scripts.mjs` 退出码 0（包内 `scripts/ownshield/` 与开发目录 `tools/ownshield/` 同名文件 sha256 全一致；有差异它自己会列出来）
 - [ ] 包内**没有任何**本机绝对路径（形如 `E:\...` 的盘符路径，含注释与示例）
 - [ ] `package.json` 的 `version` 与 `CHANGELOG.md` 顶部段落一致
 - [ ] `README.md` 首屏仍有「升级须先卸两个旧包」的警示块
