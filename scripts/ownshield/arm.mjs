@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * ownshield arm —— 武装 / 撤防 / 状态三合一。
+ * ownshield arm —— 看护 / 停止看护 / 状态三合一。
  *
  * 用法：
  *   node arm.mjs arm --tag <tag> [--notify-session <id>] [--state-dir <dir>] [--dry-run] [--json]
@@ -8,17 +8,17 @@
  *   node arm.mjs disarm [--reason <r>] [--state-dir <dir>] [--json]
  *   node arm.mjs status [--state-dir <dir>] [--json]
  *
- * 设计约束（按需武装、非常驻）：
+ * 设计约束（按需看护、非常驻）：
  *   - 只有三步前置检查全部通过才写 arm.json：快照存在、快照闸通过
  *     （等价于 watch.mjs --check-snapshot <tag> 返回 0）、DSH 主进程存在。
- *   - armedAt 取「最早主进程启动时刻 - 10 秒」，让武装时刻早于本次启动，
+ *   - armedAt 取「最早主进程启动时刻 - 10 秒」，让启动看护时刻早于本次启动，
  *     watch 会自己认当前 boot（11-21 已验证的做法）。
  *   - 计划任务幂等：schtasks /Create /F 覆盖同名任务。
- *   - 撤防只移动 arm.json，不删除计划任务：未武装时 cookie 守卫仍需每分钟运行。
+ *   - 停止看护只移动 arm.json，不删除计划任务：未在看护时 cookie 守卫仍需每分钟运行。
  *   - status 严格只读：只读文件与查询任务，不写任何文件、不启动看门狗。
  *   - --dry-run 完整判定并输出，但不写 arm.json、不建任务、不建目录；
  *     启动器内容照算（输出 launcher.content），只是不落盘。
- *   - 计划任务不再引用仓库里的静态 watch-silent.vbs：武装时按运行时探测到的
+ *   - 计划任务不再引用仓库里的静态 watch-silent.vbs：启动看护时按运行时探测到的
  *     node 路径与 watch.mjs 绝对路径生成 <stateDir>/watch-silent.vbs，
  *     任务命令行指向这份生成的启动器。仓库里那份只剩模板用途。
  *   - 找不到 Node 是硬失败（ok:false + problems），不静默跳过——否则看门狗等于不存在。
@@ -37,7 +37,7 @@ const SCRIPT_DIR = fs.realpathSync(path.dirname(SELF));
 const SNAPSHOT_CLI = path.join(SCRIPT_DIR, 'snapshot.mjs');
 const WATCH_CLI = path.join(SCRIPT_DIR, 'watch.mjs');
 /**
- * 启动器文件名。武装时生成到 <stateDir>/watch-silent.vbs，计划任务指向它。
+ * 启动器文件名。启动看护时生成到 <stateDir>/watch-silent.vbs，计划任务指向它。
  * 仓库里同名文件（tools/ownshield/watch-silent.vbs）只留注释模板，见 buildLauncherContent()。
  */
 const LAUNCHER_FILENAME = 'watch-silent.vbs';
@@ -56,7 +56,7 @@ const ARM_DEFAULTS = {
   baselineTag: 'baseline',
   failures: 0,
 };
-/** README 的环境要求：Node 22+。低版本只告警，不阻断武装。 */
+/** README 的环境要求：Node 22+。低版本只告警，不阻断看护。 */
 const NODE_MIN_MAJOR = 22;
 const NODE_PROBE_TIMEOUT_MS = 15000;
 /** 磁盘告警线（低于它只写 warnings，不阻断）。 */
@@ -459,7 +459,7 @@ export function buildLauncherContent({ nodePath, nodeSource = '', nodeVersion = 
   const quoteArg = (value) => (/[\s"]/.test(String(value)) ? `"${value}"` : String(value));
   const args = [nodePath, watchScript, '--state-dir', stateDir].map(quoteArg);
   const lines = [
-    "' ownshield 计划任务启动器 —— 由 arm.mjs 在武装时动态生成，请勿手工编辑",
+    "' ownshield 计划任务启动器 —— 由 arm.mjs 在启动看护时动态生成，请勿手工编辑",
     "' 生成时间: " + new Date(nowMs).toISOString(),
     "' node:     " + nodePath + (nodeSource ? "（来源 " + nodeSource + (nodeVersion ? "，v" + nodeVersion : "") + "）" : ""),
     "' watch:    " + watchScript,
@@ -646,7 +646,7 @@ function parseArgs(argv) {
 }
 
 function usage() {
-  console.log(`ownshield arm —— 武装 / 撤防 / 状态（按需，非常驻）
+  console.log(`ownshield arm —— 看护 / 停止看护 / 状态（按需，非常驻）
 
 用法:
   node arm.mjs arm --tag <快照tag> [--notify-session <会话id>] [--state-dir <目录>] [--dry-run] [--json]
@@ -659,18 +659,18 @@ function usage() {
   --task-name    计划任务名（默认 ownshield-watch）
   --node-path    指定 node 可执行文件（等价 config.nodePath；默认运行时探测）
   --no-task      只写 arm.json 与 <stateDir>/watch-silent.vbs，跳过 schtasks（沙盘/验收用）
-  --replace      已处于武装状态时强制覆盖既有 arm.json（默认拒绝：回滚点是安全资产，
+  --replace      已处于看护状态时强制覆盖既有 arm.json（默认拒绝：回滚点是安全资产，
                  覆盖一次就少一个已知可用状态；同一 tag 的重复调用按幂等放行）
   --json         机器可读输出
 
-武装前置检查（任一不过即拒绝，退出码 3，不写任何文件）:
+启动看护前置检查（任一不过即拒绝，退出码 3，不写任何文件）:
   1. 快照存在；2. 快照闸通过（watch.mjs --check-snapshot 返回 0）；3. DSH 主进程存在；
   4. 能探测到可执行的 node（找不到就明确报错——没有 Node 看门狗等于不存在）。
-  启动器在武装时按探测到的 node 路径生成到 <stateDir>/watch-silent.vbs，计划任务指向它。
+  启动器在启动看护时按探测到的 node 路径生成到 <stateDir>/watch-silent.vbs，计划任务指向它。
   node 探测顺序：--node-path(config.nodePath) → OWNSHIELD_NODE → DSH_NODE → NODE_EXE
                  → where node → 常见安装位置。
 环境要求：Windows + Node.js ${NODE_MIN_MAJOR}+（见 README）。
-撤防只把 arm.json 移入 disarm/，不删除计划任务（未武装时 cookie 守卫仍需每分钟运行）。
+停止看护只把 arm.json 移入 disarm/，不删除计划任务（未在看护时 cookie 守卫仍需每分钟运行）。
 status 只读：不读之外不写任何文件、不启动看门狗。`);
 }
 
@@ -689,7 +689,7 @@ export function arm(opts) {
     problems.push('缺少 --tag（快照 tag 不能为空）');
   }
 
-  // 已武装时默认拒绝覆盖：回滚点是安全资产，覆盖一次就少一个已知可用状态。
+  // 已在看护时默认拒绝覆盖：回滚点是安全资产，覆盖一次就少一个已知可用状态。
   // 同一 tag 的重复调用按幂等放行（重试不该被拦），不同 tag 必须显式 replace。
   const existingRead = readJsonSafe(armFile);
   const existing =
@@ -701,10 +701,10 @@ export function arm(opts) {
     checks.push({
       name: 'already-armed',
       ok: false,
-      detail: `已处于武装状态：tag ${existingTag || '(空)'}，armedAt ${existingArmedAt || '(未记录)'}`,
+      detail: `已处于看护状态：tag ${existingTag || '(空)'}，armedAt ${existingArmedAt || '(未记录)'}`,
     });
     problems.push(
-      `已处于武装状态（tag ${existingTag || '(空)'}，armedAt ${existingArmedAt || '(未记录)'}）：` +
+      `已处于看护状态（tag ${existingTag || '(空)'}，armedAt ${existingArmedAt || '(未记录)'}）：` +
         '继续会覆盖回滚点。先 ownshield_disarm，或确认要覆盖再传 replace=true。',
     );
   } else if (existing !== null) {
@@ -712,8 +712,8 @@ export function arm(opts) {
       name: 'already-armed',
       ok: true,
       detail: sameTag
-        ? `重复武装同一快照「${tag}」，按幂等处理`
-        : `覆盖既有武装（tag ${existingTag || '(空)'} → ${tag}，replace=true）`,
+        ? `重复看护同一快照「${tag}」，按幂等处理`
+        : `覆盖既有看护（tag ${existingTag || '(空)'} → ${tag}，replace=true）`,
     });
   }
 
@@ -748,7 +748,7 @@ export function arm(opts) {
   checks.push({ name: 'dsh-process', ok: processOk, detail: processDetail });
   if (!processOk) problems.push(processDetail);
 
-  // 启动器：武装时按运行时探测到的 node 生成到状态目录；仓库里的静态文件只剩模板。
+  // 启动器：启动看护时按运行时探测到的 node 生成到状态目录；仓库里的静态文件只剩模板。
   const launcherPath = path.join(stateDir, LAUNCHER_FILENAME);
   const watchScriptOk = fs.existsSync(WATCH_CLI);
   const node = resolveNodePath(opts);
@@ -777,7 +777,7 @@ export function arm(opts) {
   if (node.ok) {
     const major = Number(String(node.version).split('.')[0]);
     if (Number.isFinite(major) && major > 0 && major < NODE_MIN_MAJOR) {
-      warnings.push(`node ${node.version} 低于建议的 ${NODE_MIN_MAJOR}+（武装本身不阻断，但恢复链未在该版本验证）`);
+      warnings.push(`node ${node.version} 低于建议的 ${NODE_MIN_MAJOR}+（看护本身不阻断，但恢复链未在该版本验证）`);
     }
   }
   const logs = resolveLogDir();
@@ -839,7 +839,7 @@ export function arm(opts) {
     ...(exe.path ? { exePath: exe.path } : {}),
     ...(notifySessionId ? { notifySessionId } : {}),
   };
-  // 先落启动器再落 arm.json：arm.json 一出现就代表「已武装」，别让它指向不存在的启动器。
+  // 先落启动器再落 arm.json：arm.json 一出现就代表「已在看护」，别让它指向不存在的启动器。
   fs.mkdirSync(stateDir, { recursive: true });
   fs.writeFileSync(launcherPath, launcherContent, 'utf8');
   base.launcher.written = true;
@@ -876,7 +876,7 @@ export function arm(opts) {
       ok: moved !== '',
       detail:
         moved !== ''
-          ? `arm.json 已移入 failed/（没有计划任务就不保留武装态）：${moved}`
+          ? `arm.json 已移入 failed/（没有计划任务就不保留看护状态）：${moved}`
           : 'arm.json 回滚失败——请手动 ownshield_disarm 后重试',
     });
     return { exitCode: EXIT.ERROR, output: { ok: false, ...base } };
@@ -894,7 +894,7 @@ export function arm(opts) {
       ok: moved !== '',
       detail:
         moved !== ''
-          ? `arm.json 已移入 failed/（计划任务查不到就不保留武装态）：${moved}`
+          ? `arm.json 已移入 failed/（计划任务查不到就不保留看护状态）：${moved}`
           : 'arm.json 回滚失败——请手动 ownshield_disarm 后重试',
     });
     return { exitCode: EXIT.ERROR, output: { ok: false, ...base } };
@@ -904,8 +904,8 @@ export function arm(opts) {
 
 /**
  * 把 arm.json 移入 failed/（留档，绝不删除）。
- * 用于「武装写到一半失败」的路径：没有计划任务就没有值守，留着 arm.json 只会制造
- * 「看起来已武装、实际上没人盯」的假状态——那比没武装更危险。
+ * 用于「看护写到一半失败」的路径：没有计划任务就没有值守，留着 arm.json 只会制造
+ * 「看起来已在看护、实际上没人盯」的假状态——那比没看护更危险。
  */
 function quarantineArm(armFile, reason) {
   try {
@@ -927,7 +927,7 @@ export function disarm(opts) {
   const reason = sanitizeReason(opts.reason);
   const output = { ok: true, wasArmed: false, movedTo: '', reason, stateDir };
   if (!fs.existsSync(armFile)) {
-    return { exitCode: EXIT.OK, output: { ...output, detail: '未武装（arm.json 不存在），无需撤防' } };
+    return { exitCode: EXIT.OK, output: { ...output, detail: '未在看护（arm.json 不存在），无需停止看护' } };
   }
   const disarmDir = path.join(stateDir, 'disarm');
   fs.mkdirSync(disarmDir, { recursive: true });
@@ -994,15 +994,15 @@ export function status(opts) {
   const taskExists = queryTaskExists(taskName);
   const launcherExists = fs.existsSync(launcherPath);
   // 一致性：armed 只代表 arm.json 在，不代表有人值守。两者不一致必须报出来——
-  // 「看起来已武装、实际零值守」比没武装更危险，会让人放心地不设防。
+  // 「看起来已在看护、实际零值守」比没看护更危险，会让人放心地不设防。
   const problems = [];
   if (armed && !taskExists) {
     problems.push(
-      `已武装但计划任务「${taskName}」不存在：看门狗不会运行，等于没武装。重跑 ownshield_arm，或先 ownshield_disarm。`,
+      `已在看护但计划任务「${taskName}」不存在：看门狗不会运行，等于没看护。重跑 ownshield_arm，或先 ownshield_disarm。`,
     );
   }
   if (armed && !launcherExists) {
-    problems.push(`已武装但启动器缺失：${launcherPath}。看门狗无法被拉起，重跑 ownshield_arm。`);
+    problems.push(`已在看护但启动器缺失：${launcherPath}。看门狗无法被拉起，重跑 ownshield_arm。`);
   }
   return {
     exitCode: EXIT.OK,
@@ -1013,6 +1013,8 @@ export function status(opts) {
       armed,
       tag,
       armedAt,
+      // 持有者 = 发起看护的会话。多会话同时改内核时，被挡住的一方靠它知道该等谁。
+      holderSessionId: typeof raw.notifySessionId === 'string' ? raw.notifySessionId : '',
       // 「主动重启」标记：restart_now 打、看门狗在预期兑现或过期后清。留着过期标记很危险。
       expectGracefulExit: raw.expectGracefulExit === true,
       expectGracefulExitAt: typeof raw.expectGracefulExitAt === 'string' ? raw.expectGracefulExitAt : '',
@@ -1033,6 +1035,8 @@ export function status(opts) {
         source: snapshots.source,
         legacy: snapshots.source === 'legacy',
         warning: snapshots.warning,
+        // 快照库没有自动 GC：asar 每变一次就多一份 ~200 MB 的 blob。数量多了提示跑 prune。
+        count: listSnapshotTags(snapshots.dir).length,
       },
       recovery: readRecovery(stateDir),
       cookieGuard: readCookieGuard(stateDir, now),
@@ -1044,7 +1048,7 @@ export function status(opts) {
 function render(output) {
   const lines = [];
   if (typeof output.armedAt === 'string') {
-    lines.push(`武装：${output.dryRun ? '干跑判定' : '已写入 arm.json'} · 快照 ${output.tag || '(空)'} · armedAt ${output.armedAt || '(未定)'}`);
+    lines.push(`看护：${output.dryRun ? '干跑判定' : '已写入 arm.json'} · 快照 ${output.tag || '(空)'} · armedAt ${output.armedAt || '(未定)'}`);
   }
   for (const check of output.checks || []) {
     lines.push(`${check.ok ? '✓' : '✗'} ${check.name}：${check.detail}`);
@@ -1081,7 +1085,7 @@ function emit(json, rc) {
     for (const line of render(out)) console.log(line);
     if (out.dryRun) console.log('[DRY-RUN] 未写 arm.json、未建计划任务');
   } else if (out.armed !== undefined) {
-    console.log(`武装：${out.armed ? `是（${out.tag}，armedAt ${out.armedAt}）` : '否'}`);
+    console.log(`看护：${out.armed ? `是（${out.tag}，armedAt ${out.armedAt}）` : '否'}`);
     console.log(`计划任务 ${out.task.name}：${out.task.exists ? '存在' : '不存在'}`);
     console.log(`启动器：${out.launcher.path}（${out.launcher.exists ? '存在' : '未生成'}）`);
     console.log(`node：${out.node.path || '(未探测到)'}（来源 ${out.node.source || '无'}）`);
@@ -1101,9 +1105,9 @@ function emit(json, rc) {
     console.log(
       `cookie 守卫：${out.cookieGuard.exists ? `${out.cookieGuard.result || '未记录'} · 退避${out.cookieGuard.backoffActive ? '中' : '无'}` : '无 cookie-guard.json'}`,
     );
-    if (out.needsHuman.exists) console.log('需要人工：needs-human.json 存在，先读它再决定是否重新武装。');
+    if (out.needsHuman.exists) console.log('需要人工：needs-human.json 存在，先读它再决定是否重新启动看护。');
   } else {
-    console.log(out.detail || (out.movedTo ? `已撤防：${out.movedTo}` : '未武装，无需撤防'));
+    console.log(out.detail || (out.movedTo ? `已停止看护：${out.movedTo}` : '未在看护，无需停止看护'));
   }
 }
 

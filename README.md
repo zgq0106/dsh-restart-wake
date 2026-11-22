@@ -12,7 +12,7 @@
 
 > ## ⚠️ 从 0.1.x 升级：必须先卸两个旧包
 >
-> 2.0.0 合并了原来的 **`dsh-ownshield`**（探针、快照、武装）与 **`dsh-ownshield-inject`**（故障回注、探针闸、request-watch）。
+> 2.0.0 合并了原来的 **`dsh-ownshield`**（探针、快照、看护）与 **`dsh-ownshield-inject`**（故障回注、探针闸、request-watch）。
 >
 > 升级步骤：① 从 profile 的 `dsh.profile.bundles` 删掉 `dsh-ownshield` 和 `dsh-ownshield-inject`；② 从 `dependencies` 删掉对应的两条；③ 再装 / 更新本包；④ 重启 Harness。
 >
@@ -55,9 +55,9 @@
 | 面孔 | 工具 | 做什么 |
 |---|---|---|
 | 探针（默认，随时可用） | `ownshield_probe` | 只检测不修复：建临时会话、发一条 `probe`、resume 固定会话、比对工具/服务清单、查 cookie 与凭据告警 |
-| 自愈链（按需武装，非常驻） | `ownshield_snapshot` / `ownshield_arm` / `ownshield_disarm` / `ownshield_status` | 改 `src/`、asar 或内核前建快照并武装；崩了由看门狗回滚 → 重启 → 校验 → 通报；**恢复成功自动撤防** |
+| 自愈链（按需看护，非常驻） | `ownshield_snapshot` / `ownshield_arm` / `ownshield_disarm` / `ownshield_status` | 改 `src/`、asar 或内核前建快照并看护；崩了由看门狗回滚 → 重启 → 校验 → 通报；**恢复成功自动停止看护** |
 
-自愈链不常驻：只有武装期间看门狗才持有回滚权。恢复链脚本随包分发在 `scripts/ownshield/`。
+自愈链不常驻：只有看护期间看门狗才持有回滚权。恢复链脚本随包分发在 `scripts/ownshield/`。
 
 还有第三条不显眼的能力：**故障回注**。看门狗判失败、熔断交人时写下的通报，会在下次启动（或运行中每 5 分钟的扫描）投递回受影响的会话；模型请求失败时（`401` / `429`）也会立刻把失败现场注入当前会话一轮，让它自己看见并告知主人。
 
@@ -84,7 +84,7 @@ dsh plugin --profile desktop add "git+https://github.com/zgq0106/dsh-restart-wak
 在新会话里让 Agent 调用 `restart_status` 与 `ownshield_status`：
 
 - `restart_status` 报告可执行文件路径、重启脚本 / 计划任务入口是否就位、登记目录、重启锁、运行中会话、日志末尾；
-- `ownshield_status` 报告是否武装、计划任务是否存在、快照库路径、最近一次恢复结论、cookie 守卫退避、`needs-human.json` 是否存在。
+- `ownshield_status` 报告是否看护、计划任务是否存在、快照库路径、最近一次恢复结论、cookie 守卫退避、`needs-human.json` 是否存在。
 
 `exePath` 显示 `⚠ 不存在` 时，在插件配置里显式指定（见「配置」）。
 
@@ -109,9 +109,9 @@ dsh plugin --profile desktop add "git+https://github.com/zgq0106/dsh-restart-wak
 |---|---|
 | `ownshield_probe` | 七项检查，只检测不修复；结果写到 `~/.dsh/ownshield/probe-<时间戳>.json` |
 | `ownshield_snapshot` | 给 `app.asar` 建内容寻址快照，返回 tag 与占用 |
-| `ownshield_arm` | 检查快照存在 / 快照闸 / DSH 进程 / Node 可执行，写 `arm.json` 并幂等创建每分钟一次的计划任务；**已武装时默认拒绝覆盖回滚点**，要换快照请显式传 `replace: true`（同一 tag 重复调用按幂等放行） |
-| `ownshield_disarm` | 撤防：`arm.json` 归档到 `disarm/`，不删计划任务（未武装时它仍跑 cookie 守卫） |
-| `ownshield_status` | 只读自检：武装状态、任务、快照库解析路径、最近恢复结论、熔断交接文件；**武装与计划任务/启动器不一致时报 `ok:false` 并打 `⚠`**（防「看起来已武装、实际没人盯」） |
+| `ownshield_arm` | 检查快照存在 / 快照闸 / DSH 进程 / Node 可执行，写 `arm.json` 并幂等创建每分钟一次的计划任务；**已在看护时默认拒绝覆盖回滚点**，要换快照请显式传 `replace: true`（同一 tag 重复调用按幂等放行） |
+| `ownshield_disarm` | 停止看护：`arm.json` 归档到 `disarm/`，不删计划任务（未在看护时它仍跑 cookie 守卫） |
+| `ownshield_status` | 只读自检：看护状态、任务、快照库解析路径、最近恢复结论、熔断交接文件；**看护与计划任务/启动器不一致时报 `ok:false` 并打 `⚠`**（防「看起来已在看护、实际没人盯」） |
 
 调用方不需要手填会话 id：工具从执行上下文 `exec.agent.id` 自动读取。
 
@@ -120,7 +120,7 @@ dsh plugin --profile desktop add "git+https://github.com/zgq0106/dsh-restart-wak
 插件通过 `ctx.systemPrompt.section()` 在 Host 根作用域注册一段说明，**所有经过这个 profile 的 Agent 每一步都会看到**，分两小节：
 
 - **重启与唤醒**：何时该重启、`restart_now` 必须是本轮最后一步、被阻塞时的登记与重检顺序、重启后先 `restart_status` 验收；
-- **本体自愈**：改内核前先快照再武装、武装后看门狗自理、连续三次失败会停手交人、恢复成功自动撤防、平时不要武装。
+- **本体自愈**：改内核前先快照再看护、启动看护后看门狗自理、连续三次失败会停手交人、恢复成功自动停止看护、平时不要看护。
 
 两节可以分别关闭：`restartPromptEnabled` / `ownshieldPromptEnabled`；旧的 `promptEnabled: false` 等价于两个都关。
 
@@ -138,21 +138,21 @@ dsh plugin --profile desktop add "git+https://github.com/zgq0106/dsh-restart-wak
 1. ownshield_snapshot({})        → 得到 tag
 2. ownshield_arm({ tag })        → 快照闸通过、任务创建成功
 3. 改内核
-4. 改崩了就等看门狗：自动回滚 → 重启 → 校验 → 通报原会话，然后自动撤防
+4. 改崩了就等看门狗：自动回滚 → 重启 → 校验 → 通报原会话，然后自动停止看护
 ```
 
 ### 重启 × 自愈：两条链怎么协同（2.0 合包后）
 
 合包不只是省一次安装——两条链现在能互相看见：
 
-- **武装态下正常重启**：`restart_now` 会在调度前给 `arm.json` 打 `expectGracefulExit`。
-  看门狗看到进程消失会按「正常退出」处理：不拉起重启、直接撤防，不会把这次重启判成崩溃
+- **看护状态下正常重启**：`restart_now` 会在调度前给 `arm.json` 打 `expectGracefulExit`。
+  看门狗看到进程消失会按「正常退出」处理：不拉起重启、直接停止看护，不会把这次重启判成崩溃
   去回滚。`restart_status` 的 `ownshield` 字段直接显示当前是否 armed、是否已标记。
 - **恢复后的续跑**：看门狗救回来时，如果目标会话写过遗嘱（`will.mjs`），投递给它的是
   `[还魂]` 消息——中断时刻、中断前的目标、已完成、下一步原计划、工具集指纹是否变更；
   没有遗嘱就退回一句事后通报，**不编造**续跑内容。
-- **武装态的假象**：`arm.json` 在、计划任务不在时，`ownshield_status` 报 `ok:false` 并在
-  首行打 `⚠`。看到「武装：是」却感觉没人管时，先看这一行。
+- **看护状态的假象**：`arm.json` 在、计划任务不在时，`ownshield_status` 报 `ok:false` 并在
+  首行打 `⚠`。看到「看护：是」却感觉没人管时，先看这一行。
 
 ---
 
@@ -264,21 +264,21 @@ node <包目录>\scripts\cookie-cleanup.mjs "$env:APPDATA\@deepseek-ai\dsh-deskt
 |---|---|---|
 | 平台 | **仅 Windows** | 依赖 `schtasks`、`wscript`（隐藏窗口启动器）、PowerShell。macOS / Linux 未实现 |
 | Node | **Node.js 22+**，且可执行文件能被探测到 | 探测顺序：`nodePath` 配置 → `OWNSHIELD_NODE` → `DSH_NODE` → `NODE_EXE` → `where node` → 常见安装位置（`%ProgramFiles%\nodejs\node.exe`、`%LOCALAPPDATA%\Programs\nodejs\node.exe`、DSH 自带的 `~/.dsh/dsh-runtimes/.../node.exe`）。**探测不到会明确报错**（`ok:false` + problems），不会静默失败 |
-| 权限 | 装插件**不需要管理员** | 武装时创建的是**当前用户级**计划任务，不加 `/RU`，不需要提权 |
+| 权限 | 装插件**不需要管理员** | 启动看护时创建的是**当前用户级**计划任务，不加 `/RU`，不需要提权 |
 | 磁盘 | 单次快照约 **200 MB**（去重后按实际 blobs 计） | 快照库默认 `~/.dsh/ownshield/snapshots`（`OWNSHIELD_SNAPSHOTS` 可覆盖）；低于 512 MB 会在 `ownshield_arm` / `ownshield_status` 里告警，低于 2 GB 时看门狗判观测基础设施异常、转人工 |
 | 状态目录 | `~/.dsh/ownshield`（`OWNSHIELD_DIR` 可覆盖） | `arm.json` / `boot.json` / `recovery.log` / 生成的 `watch-silent.vbs` / `needs-human.json` 都在这里 |
 
-武装时 `arm.mjs` 把**运行时探测到的** node 路径与 `watch.mjs` 绝对路径写进 `<状态目录>\watch-silent.vbs`，计划任务指向这一份；仓库里的同名文件只是注释模板，不再被引用。换机器不需要改任何文件。
+启动看护时 `arm.mjs` 把**运行时探测到的** node 路径与 `watch.mjs` 绝对路径写进 `<状态目录>\watch-silent.vbs`，计划任务指向这一份；仓库里的同名文件只是注释模板，不再被引用。换机器不需要改任何文件。
 
-### 武装 / 撤防 / 卸载
+### 看护 / 停止看护 / 卸载
 
-**武装**（要改内核时）：
+**看护**（要改内核时）：
 
 ```text
-ownshield_snapshot ──建快照──▶ ownshield_arm ──武装──▶ 改内核 ──崩了──▶ 自动回滚/重启/校验/通报
+ownshield_snapshot ──建快照──▶ ownshield_arm ──看护──▶ 改内核 ──崩了──▶ 自动回滚/重启/校验/通报
 ```
 
-**撤防**：恢复成功会自动撤防（`arm.json` 移进 `disarm/`）。手工撤防用 `ownshield_disarm`，或命令行：
+**停止看护**：恢复成功会自动停止看护（`arm.json` 移进 `disarm/`）。手工停止看护用 `ownshield_disarm`，或命令行：
 
 ```powershell
 node <包目录>\scripts\ownshield\arm.mjs disarm --reason manual
@@ -293,14 +293,14 @@ Remove-Item -Recurse -Force "$env:USERPROFILE\.dsh\ownshield"
 Remove-Item -Recurse -Force "$env:USERPROFILE\.dsh\restart-wake"
 ```
 
-> 撤防**不删**计划任务：未武装时它还每分钟跑一次 cookie 守卫（只读，不持有回滚权）。真正不想让它跑，才执行上面的 `schtasks /Delete`。
+> 停止看护**不删**计划任务：未在看护时它还每分钟跑一次 cookie 守卫（只读，不持有回滚权）。真正不想让它跑，才执行上面的 `schtasks /Delete`。
 
 ### 恢复链怎么判
 
-- 武装期间每分钟跑一次：检查 DSH 主进程、探针或崩溃信号、cookie 是否过期。
-- 判定为硬故障就回滚 asar → 重启 Harness → 启动后校验（进程 + 工具清单）→ 成功则撤防，并把结论回注到原会话。
-- **连续失败三次**停手，写 `~/.dsh/ownshield/needs-human.json` 并撤防——这是设计，不是缺陷。此时先看 `ownshield_status`，处理完再决定要不要重新武装。
-- cookie 过期是特例：武装态只重启不回滚（回滚 asar 对登录过期没有意义）；未武装态由每分钟守卫独立处理，失败退避 10 分钟。
+- 看护期间每分钟跑一次：检查 DSH 主进程、探针或崩溃信号、cookie 是否过期。
+- 判定为硬故障就回滚 asar → 重启 Harness → 启动后校验（进程 + 工具清单）→ 成功则停止看护，并把结论回注到原会话。
+- **连续失败三次**停手，写 `~/.dsh/ownshield/needs-human.json` 并停止看护——这是设计，不是缺陷。此时先看 `ownshield_status`，处理完再决定要不要重新启动看护。
+- cookie 过期是特例：看护状态只重启不回滚（回滚 asar 对登录过期没有意义）；未在看护态由每分钟守卫独立处理，失败退避 10 分钟。
 
 ---
 
@@ -371,7 +371,7 @@ Remove-Item -Recurse -Force "$env:USERPROFILE\.dsh\restart-wake"
 | `resumeTimeoutMs` | `30000` | resume 超时 |
 | `scriptsDir` | `<pluginDir>/scripts/ownshield`，开发检出回落到 `<repo>/tools/ownshield` | 恢复链脚本位置 |
 | `watchTaskName` | `ownshield-watch` | 每分钟一次看门狗的计划任务名 |
-| `nodePath` | 空（武装时运行时探测） | 写进生成启动器的 node 路径；等价环境变量 `OWNSHIELD_NODE` |
+| `nodePath` | 空（启动看护时运行时探测） | 写进生成启动器的 node 路径；等价环境变量 `OWNSHIELD_NODE` |
 
 故障回注：
 
@@ -403,7 +403,7 @@ Remove-Item -Recurse -Force "$env:USERPROFILE\.dsh\restart-wake"
 - 默认拒绝在「其他未登记的运行中会话」存在时重启（`force: true` 可覆盖）；
 - 重启前校验可执行文件、脚本、计划任务入口，缺一个就**不动手**；
 - 探针的失败**不自动触发**任何回滚/重启——刻意划的边界，避免「越修越坏」的自激系统；
-- 看门狗只在武装期间持有回滚权，恢复成功自动撤防，连续失败三次停手交人；
+- 看门狗只在看护期间持有回滚权，恢复成功自动停止看护，连续失败三次停手交人；
 - 回滚对象只有安装目录的 `app.asar`（可选纳入 profile 层），**不碰** `~/.dsh` 下的记忆与会话；
 - 不碰凭据、不上传任何数据、不包含任何遥测。
 
@@ -439,12 +439,12 @@ Remove-Item -Recurse -Force "$env:USERPROFILE\.dsh\restart-wake"
 
 | 现象 | 先看什么 | 处置 |
 |---|---|---|
-| 计划任务存在但「什么都没发生」 | `ownshield_status`：任务是否存在、启动器是否存在、node / exe 解析结果、磁盘剩余 | 启动器丢失就重新武装（会重新生成）；任务被禁用就 `schtasks /Run /TN ownshield-watch` 试跑一次，看 `recovery.log` 末尾 |
+| 计划任务存在但「什么都没发生」 | `ownshield_status`：任务是否存在、启动器是否存在、node / exe 解析结果、磁盘剩余 | 启动器丢失就重新启动看护（会重新生成）；任务被禁用就 `schtasks /Run /TN ownshield-watch` 试跑一次，看 `recovery.log` 末尾 |
 | 找不到 Node | `ownshield_arm` 返回 `ok:false`，problems 里有「找不到 Node」 | 装 Node.js 22+，或设 `nodePath` / `OWNSHIELD_NODE` 指向 `node.exe`。**不会静默失败** |
 | 找不到 DSH 可执行文件 | `ownshield_status` 的 exe 解析来源 | 设 `OWNSHIELD_EXE`，或在 `arm.json` 里写 `exePath` |
 | 快照库在旧路径 | `ownshield_status` 的告警行 | 把快照目录搬到 `~/.dsh/ownshield/snapshots`（或设 `OWNSHIELD_SNAPSHOTS`） |
-| 武装被拒（退出码 3） | problems 逐项：快照不存在 / 快照闸拒绝 / 没有 DSH 主进程 / 找不到 Node | 逐项修；快照闸拒绝通常意味着 DSH 升级过，旧快照回滚会降级，先重建快照 |
-| 连续失败三次后停手 | `~/.dsh/ownshield/needs-human.json` | 这是设计（熔断交人）：读文件里的原因，人工处理后再重新武装 |
+| 看护被拒（退出码 3） | problems 逐项：快照不存在 / 快照闸拒绝 / 没有 DSH 主进程 / 找不到 Node | 逐项修；快照闸拒绝通常意味着 DSH 升级过，旧快照回滚会降级，先重建快照 |
+| 连续失败三次后停手 | `~/.dsh/ownshield/needs-human.json` | 这是设计（熔断交人）：读文件里的原因，人工处理后再重新启动看护 |
 | 启动日志报重复工具标识 | profile 里是否还留着 `dsh-ownshield` / `dsh-ownshield-inject` | 按首屏升级须知卸掉两个旧包再重启 |
 
 ---

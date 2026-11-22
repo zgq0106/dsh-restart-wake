@@ -1,5 +1,5 @@
 /**
- * 本地 Web 登录 cookie 过期守卫：判据、信号识别、未武装快通道。
+ * 本地 Web 登录 cookie 过期守卫：判据、信号识别、未在看护快通道。
  *
  * 背景：11-19 那次页面 401 是 cookie 过期，而它不写 DSH 日志、不进会话事件，
  * 只能从「进程年龄 vs cookieMaxAgeDays」静态推断。这里固定该判据，并保证
@@ -148,7 +148,7 @@ test('探针 checks 里的 cookieStale 变成 cookie-stale 信号（ok 仍为 tr
   assert.equal(miss.some((item) => item.type === 'cookie-stale'), false, '没有标记就不该产生信号')
 })
 
-test('未武装：cookie 未过期时正常退出，不碰进程', async () => {
+test('未在看护：cookie 未过期时正常退出，不碰进程', async () => {
   const now = Date.now()
   const home = makeHome({ startAgoMs: 10 * 60_000, lastAgoMs: 60_000, now })
   const stateDir = join(home, 'state')
@@ -163,7 +163,7 @@ test('未武装：cookie 未过期时正常退出，不碰进程', async () => {
   }
 })
 
-test('未武装：cookie 过期 → 判定 recover，dry-run 不重启', async () => {
+test('未在看护：cookie 过期 → 判定 recover，dry-run 不重启', async () => {
   const now = Date.now()
   const home = makeHome({ startAgoMs: 30 * HOUR, lastAgoMs: 60_000, now })
   const stateDir = join(home, 'state')
@@ -179,7 +179,7 @@ test('未武装：cookie 过期 → 判定 recover，dry-run 不重启', async (
   }
 })
 
-test('未武装：--no-cookie-guard 关闭守卫', async () => {
+test('未在看护：--no-cookie-guard 关闭守卫', async () => {
   const now = Date.now()
   const home = makeHome({ startAgoMs: 30 * HOUR, lastAgoMs: 60_000, now })
   const stateDir = join(home, 'state')

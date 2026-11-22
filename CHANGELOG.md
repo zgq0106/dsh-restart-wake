@@ -55,6 +55,16 @@
   **真崩溃**会被当成正常退出而不救，比不打标记更危险。现在标记带 `expectGracefulExitAt`
   时间戳，只在 10 分钟窗口内算数；看门狗建起新 boot 后主动清除，过期标记也清。
   没写时间戳的标记一律不认（人工声明正常退出请用 `autoGracefulExit: "no-crash-evidence"`）。
+- **快照库只长不缩**：`snapshot.mjs` 新增 `prune`（`--keep N` / `--keep-tag` / `--dry-run` / `--json`）。
+  快照库没有自动 GC，asar 每变一次就多一份约 200 MB 的 blob，此前只能靠人工判断该删哪份、删了
+  目录还收不回空间。现在：`arm.json` 引用的 tag 与 `--keep-tag`（默认 `baseline`）**永不删除**，
+  其余按时间保留最近 `--keep` 份（默认 3），最后只用**删完之后剩余的** manifest 建引用集合、
+  回收孤儿 blob——宁可少删一个孤块，也不删错一个活块。`ownshield_status` 在快照超过 5 份时提示可清理。
+- **术语统一**：面向用户的措辞由「武装 / 撤防」改为「看护 / 停止看护」。工具名 `ownshield_arm` /
+  `ownshield_disarm`、状态文件 `arm.json`、归档目录 `disarm/` 保持不变（`arm`/`disarm` 是标准术语，
+  改名会破坏兼容）。
+- **多会话改内核时能看到持有者**：`ownshield_status` 与 `restart_status` 显示发起看护的会话，
+  被挡住的一方不用猜该等谁。
 
 **新增**
 

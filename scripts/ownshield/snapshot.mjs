@@ -304,6 +304,8 @@ function parseArgs(argv) {
     else if (a === '--paths') { const v = argv[++i]; if (v === undefined) throw new Error('--paths 缺少值'); (opts.paths ||= []).push(v); }
     else if (a === '--to') { opts.to = argv[++i]; if (opts.to === undefined) throw new Error('--to 缺少值'); }
     else if (a === '--dry-run') opts.dryRun = true;
+    else if (a === '--keep') { const v = argv[++i]; if (v === undefined) throw new Error('--keep 缺少值'); opts.keep = Number(v); }
+    else if (a === '--keep-tag') { const v = argv[++i]; if (v === undefined) throw new Error('--keep-tag 缺少值'); (opts.keepTags ||= []).push(v); }
     else if (a === '--with-profile') opts.withProfile = true;
     else if (a === '--profile-dir') {
       opts.profileDir = argv[++i];
@@ -991,6 +993,140 @@ function restore(opts, tag) {
   if (skipped) console.log(`  幂等: ${skipped} 个目标内容已一致，未做任何写入。`);
 }
 
+/** 读 arm.json 的 tag：当前唯一被看护引用的回滚点，prune 必须保住。 */
+function readArmTag() {
+  try {
+    const file = path.join(path.dirname(SNAPSHOTS), 'arm.json');
+    if (!fs.existsSync(file)) return '';
+    const raw = JSON.parse(String(fs.readFileSync(file, 'utf8')).replace(/^\uFEFF/, ''));
+    return typeof raw?.tag === 'string' ? raw.tag : '';
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * prune：清理旧快照并回收孤儿 blob。
+ *
+ * 快照库没有自动 GC，asar 每变一次就多一份 ~200 MB 的 blob，所以这里把「删」做成
+ * 一条有护栏的显式命令，而不是让它无限长。安全规则按顺序：
+ *   1. `arm.json` 引用的 tag **永不删除**——那是当前唯一的回滚点；
+ *   2. `--keep-tag`（默认 `baseline`）**永不删除**——已知好版本；
+ *   3. 其余按 ts 从新到旧保留 `--keep` 份（默认 3），更早的才进删除名单；
+ *   4. blob 回收放在最后：只用**删完之后剩余**的 manifest 建引用集合，
+ *      不在集合里的才算孤儿——宁可少删一个孤块，也不删错一个活块。
+ */
+function prune(opts) {
+  const dryRun = opts.dryRun === true;
+  const keep = Number.isInteger(opts.keep) && opts.keep >= 0 ? opts.keep : 3;
+  const keepTags = new Set(['baseline', ...(opts.keepTags || [])]);
+  const armTag = readArmTag();
+  if (armTag) keepTags.add(armTag);
+
+  const all = readManifests(); // ts 升序：最旧在前
+  const newestFirst = [...all].reverse();
+
+  const survivors = new Set();
+  let kept = 0;
+  for (const m of newestFirst) {
+    if (keepTags.has(m.tag)) {
+      survivors.add(m.dirName);
+      continue;
+    }
+    if (kept < keep) {
+      survivors.add(m.dirName);
+      kept++;
+      continue;
+    }
+  }
+
+  const doomed = all.filter((m) => !survivors.has(m.dirName));
+
+  const referenced = new Set();
+  for (const m of all) {
+    if (!survivors.has(m.dirName)) continue;
+    for (const f of m.files || []) {
+      if (f && typeof f.sha256 === 'string') referenced.add(f.sha256);
+    }
+  }
+
+  let blobAll = [];
+  try {
+    blobAll = fs.readdirSync(BLOBS).filter((name) => !name.startsWith('.'));
+  } catch {
+    blobAll = [];
+  }
+  const orphans = blobAll.filter((sha) => !referenced.has(sha));
+  let orphanBytes = 0;
+  for (const sha of orphans) {
+    try {
+      orphanBytes += fs.statSync(path.join(BLOBS, sha)).size;
+    } catch {
+      /* 统计失败不影响判断 */
+    }
+  }
+
+  const removedDirs = [];
+  const removedBlobs = [];
+  if (!dryRun) {
+    for (const m of doomed) {
+      try {
+        fs.rmSync(m.dir, { recursive: true, force: true });
+        removedDirs.push(m.dirName);
+        appendLog({ op: 'prune', snapshot: m.dirName, tag: m.tag, result: 'removed' });
+      } catch (err) {
+        appendLog({ op: 'prune', snapshot: m.dirName, tag: m.tag, result: 'fail', note: err.message });
+      }
+    }
+    for (const sha of orphans) {
+      try {
+        fs.unlinkSync(path.join(BLOBS, sha));
+        removedBlobs.push(sha);
+        appendLog({ op: 'prune', blob: short(sha), result: 'removed' });
+      } catch (err) {
+        appendLog({ op: 'prune', blob: short(sha), result: 'fail', note: err.message });
+      }
+    }
+  }
+
+  const summary = {
+    ok: true,
+    dryRun,
+    keep,
+    keepTags: [...keepTags],
+    armTag,
+    total: all.length,
+    survivors: all
+      .filter((m) => survivors.has(m.dirName))
+      .map((m) => ({ tag: m.tag, snapshot: m.dirName, ts: m.ts })),
+    doomed: doomed.map((m) => ({ tag: m.tag, snapshot: m.dirName, ts: m.ts })),
+    blobs: { total: blobAll.length, orphans: orphans.map((sha) => short(sha)), orphanBytes },
+    removed: { dirs: removedDirs, blobs: removedBlobs.length },
+  };
+
+  // silent：给测试与程序化调用用，不往 stdout 打报告。
+  if (opts.silent === true) return summary;
+
+  if (opts.json) {
+    console.log(JSON.stringify(summary, null, 2));
+    return summary;
+  }
+
+  const head = dryRun ? '[DRY-RUN] ' : '';
+  console.log(
+    `${head}快照库：${summary.total} 份 → 保留 ${summary.survivors.length} 份，清理 ${summary.doomed.length} 份`,
+  );
+  if (armTag) console.log(`  当前看护引用：${armTag}（强制保留）`);
+  for (const m of summary.survivors) console.log(`  保留  ${m.snapshot}  (${m.tag}, ${m.ts})`);
+  for (const m of summary.doomed) console.log(`  ${dryRun ? '将删' : '已删'}  ${m.snapshot}  (${m.tag}, ${m.ts})`);
+  console.log(
+    `  blob：共 ${summary.blobs.total} 个，孤儿 ${summary.blobs.orphans.length} 个（${mib(summary.blobs.orphanBytes)}）` +
+      (dryRun ? '，将回收' : `，已回收 ${removedBlobs.length} 个`),
+  );
+  if (dryRun) console.log('  未写入任何文件；确认无误后去掉 --dry-run 再跑一次。');
+  return summary;
+}
+
 function filesSuffix(base) {
   for (let n = 2; ; n++) if (!fs.existsSync(`${base}-${n}`)) return String(n);
 }
@@ -1001,6 +1137,11 @@ function usage() {
   console.log('  node snapshot.mjs list [--json]');
   console.log('  node snapshot.mjs restore <tag> [--to <目标>] [--with-profile [--profile-dir D]] [--dry-run] [--json]');
   console.log('  node snapshot.mjs verify <tag> [--json]');
+  console.log('  node snapshot.mjs prune [--keep <N>] [--keep-tag <tag>]... [--dry-run] [--json]');
+  console.log('');
+  console.log('  prune 安全规则：arm.json 引用的 tag 与 --keep-tag（默认 baseline）永不删除；');
+  console.log('                 其余按时间保留最近 --keep 份（默认 3）；最后只回收没有 manifest 引用的 blob。');
+  console.log('                 快照库不会自动缩小，容量大了就手动跑一次 prune。');
   console.log('');
   console.log(`  默认对象: ${resolveInstallAsar() || '(未探测到——请设 OWNSHIELD_ASAR 或 OWNSHIELD_EXE，或用 --paths)'}`);
   console.log('  --with-profile 额外纳入 cordis.patch.yml（含备份链）、预设目录、插件链接表；默认关闭');
@@ -1026,6 +1167,7 @@ function main() {
       if (!tag) throw new Error('restore 需要 <tag>');
       return restore(opts, tag);
     }
+    if (cmd === 'prune') return prune(opts);
     throw new Error(`未知子命令: ${cmd}`);
   } catch (err) {
     console.error(`失败: ${err.message}`);
@@ -1038,4 +1180,4 @@ if (process.argv[1] && path.resolve(process.argv[1]) === path.resolve(SELF_PATH)
   main();
 }
 
-export { create, list, restore, verify, main };
+export { create, list, restore, verify, prune, main };

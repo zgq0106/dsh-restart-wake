@@ -33,7 +33,7 @@ function pathsOf(dir) {
   }
 }
 
-test('未武装时打标记是空操作', () => {
+test('未在看护时打标记是空操作', () => {
   const dir = tempDir('noarm')
   try {
     const result = markGracefulExit({ ownshieldDir: dir })
@@ -44,7 +44,7 @@ test('未武装时打标记是空操作', () => {
   }
 })
 
-test('武装时打标记写入 expectGracefulExit 且不丢原字段', () => {
+test('看护中打标记写入 expectGracefulExit 且不丢原字段', () => {
   const dir = tempDir('mark')
   try {
     const file = join(dir, 'arm.json')

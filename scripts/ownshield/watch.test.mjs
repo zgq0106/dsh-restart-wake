@@ -391,7 +391,7 @@ test('无 arm.json 立即退出且不创建状态目录', () => {
     const result = runWatch({ dryRun: false, json: false, quiet: false, stateDir, exe: '' });
     assert.equal(result.exitCode, 0);
     assert.equal(result.output.armed, false);
-    assert.equal(fs.existsSync(stateDir), false, '未武装时不应创建任何目录');
+    assert.equal(fs.existsSync(stateDir), false, '未在看护时不应创建任何目录');
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -446,7 +446,7 @@ test('--dry-run：造 arm.json + 死 pid boot.json → 判定将执行 L1，且�
   }
 });
 
-test('武装但尚未出现新启动时只等待，不做动作', () => {
+test('看护但尚未出现新启动时只等待，不做动作', () => {
   const dir = tmpDir('waiting');
   fs.writeFileSync(
     path.join(dir, 'arm.json'),
@@ -513,7 +513,7 @@ test('process-gone：宽限期前后都判（2026-11-20 修正，旧行为只判
     heartbeats: { ok: false, files: [] },
     probes: { ok: false, files: [] },
   });
-  // 修正前这里期望空数组——那正是「武装超过 120 秒后崩溃无信号」的缺陷本身。
+  // 修正前这里期望空数组——那正是「看护超过 120 秒后崩溃无信号」的缺陷本身。
   assert.deepEqual(
     after.map((signal) => signal.type),
     ['process-gone'],

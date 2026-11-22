@@ -18,14 +18,14 @@
  *   会每分钟创建一个控制台窗口，桌面闪一下（2026-11-19 实测踩到）。
  *   schtasks /Create /TN ownshield-watch /SC MINUTE /MO 1 /F \
  *     /TR "C:\Windows\System32\wscript.exe //B //Nologo \"<stateDir>\watch-silent.vbs\""
- *   schtasks /Delete /TN ownshield-watch /F      # 撤防/卸载时
+ *   schtasks /Delete /TN ownshield-watch /F      # 停止看护/卸载时
  *
  * 输入（~/.dsh/ownshield/）：
- *   arm.json       武装状态 { tag, armedAt, graceSeconds, maxLevel, failures }
+ *   arm.json       看护状态 { tag, armedAt, graceSeconds, maxLevel, failures }
  *                  可选：baselineTag(默认 baseline)、maxRecoveryAttempts(默认 3)、
  *                        maxFailures(默认 3)、verifyTimeoutSeconds、
  *                        exePath、crashLogDir、confirmations
- *   boot.json      武装后那次启动的记录（本工具写；也接受外部预置）
+ *   boot.json      启动看护后那次启动的记录（本工具写；也接受外部预置）
  *   hb-*.json      心跳（由注入器/探针侧写；时间取 ts/at/time/createdAt，退回文件名或 mtime）
  *   probe-*.json   探针结果（T2）：{ ok, ts, checks:[{name,ok,error,detail}], durationMs }
  *   %APPDATA%\@deepseek-ai\dsh-desktop\logs\crash-*.log   崩溃日志（只看文件名时间）
@@ -42,24 +42,24 @@
  *   L1 = snapshot.mjs restore <arm.tag> → 重启 DSH → 复检
  *   L2 = snapshot.mjs restore <arm.baselineTag> → 重启 DSH → 复检
  *   同一 arm 轮次内 L1 只用一次；每级重启后复检；最多 maxRecoveryAttempts 次（默认 3，
- *   顺序 L1 → L2 → L2）；全部失败写 needs-human.json 并撤防。
+ *   顺序 L1 → L2 → L2）；全部失败写 needs-human.json 并停止看护。
  *   连续失败 maxFailures 次（默认 3）熔断。
  *
  * 状态/审计文件（~/.dsh/ownshield/）：
  *   watch-state.json  判定计数（strikes）、已用级别、恢复尝试（内部遥测，原子覆盖）
  *   boots/            旧 boot.json 归档（移动，不删除）
- *   disarm/           撤防后的 arm.json 归档（移动，不删除）
+ *   disarm/           停止看护后的 arm.json 归档（移动，不删除）
  *   recovery.log      每次动作的审计行：时间 事件 级别 动作 结果
  *   recovered.json    恢复成功记录
  *   needs-human.json  熔断/无路可走时的交接文件
  *
  * 硬约束：
- *   - 不删除任何文件；撤防 = 把 arm.json 移动到 disarm/，换 boot.json 前归档旧文件。
+ *   - 不删除任何文件；停止看护 = 把 arm.json 移动到 disarm/，换 boot.json 前归档旧文件。
  *   - 所有动作幂等：restore 同内容跳过、重启前先确认 exe、重复检查不叠加副作用。
  *   - 本文件不直接写安装目录；asar 还原一律调用 snapshot.mjs（它自己备份后原子替换）。
  *   - --dry-run 保证零写入、零进程操作。
  *
- * 退出码：0 正常/未武装/观察中；2 错误；3 交人（needs-human）；4 本轮恢复成功。
+ * 退出码：0 正常/未在看护/观察中；2 错误；3 交人（needs-human）；4 本轮恢复成功。
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -457,9 +457,9 @@ export function parseArgs(argv) {
     allowQuarantine: false,
     /** A4：隔离后的复核命令（退出码 0 = 通过）；空则跳过复核。 */
     probeCmd: '',
-    /** 只做快照一致性核对（武装前用），不进入判定流程。 */
+    /** 只做快照一致性核对（启动看护前用），不进入判定流程。 */
     checkSnapshot: '',
-    /** 未武装时也守本地 Web cookie 过期（真到寿命就重启）；--no-cookie-guard 关闭。 */
+    /** 未在看护时也守本地 Web cookie 过期（真到寿命就重启）；--no-cookie-guard 关闭。 */
     cookieGuard: true,
     /** 覆盖 DSH 家目录（演练用），默认 $DSH_HOME 或 ~/.dsh。 */
     dshHome: '',
@@ -501,11 +501,11 @@ function usage() {
   --process-name   覆盖 DSH 进程名（默认 $env:OWNSHIELD_PROC_NAME 或 DeepSeek Harness）
   --allow-quarantine  结构性检测命中时真的隔离 patch 行（默认只干跑，不写盘）
   --probe-cmd <cmd>   隔离后的复核命令，退出码 0 = 通过；不给则记「未复核」
-  --check-snapshot <tag>  只核对快照能否用于回滚（武装前用）；0=可用，3=拒绝
-  --no-cookie-guard       关闭「未武装时的 cookie 过期守卫」（默认开启）
+  --check-snapshot <tag>  只核对快照能否用于回滚（启动看护前用）；0=可用，3=拒绝
+  --no-cookie-guard       关闭「未在看护时的 cookie 过期守卫」（默认开启）
   --dsh-home <目录>       覆盖 DSH 家目录（默认 $DSH_HOME 或 ~/.dsh，演练用）
 
-未武装（arm.json 不存在）时不做判定，只跑一次 cookie 过期守卫（读 host.log + profile 补丁，
+未在看护（arm.json 不存在）时不做判定，只跑一次 cookie 过期守卫（读 host.log + profile 补丁，
 过期则重启 DSH 并写 recovery.log；失败退避 10 分钟）。
 计划任务由安装方创建，本脚本不注册/删除任何计划任务。`);
 }
@@ -541,7 +541,7 @@ function resolvePaths(opts) {
     crashDir,
     logSource,
     snapshotCli: SNAPSHOT_CLI,
-    // 这里只按「显式配置」推导，不做进程表探测（未武装时每分钟跑一次，不能加开机成本）。
+    // 这里只按「显式配置」推导，不做进程表探测（未在看护时每分钟跑一次，不能加开机成本）。
     installAsar: resolveInstallAsarFromEnv(opts.exe),
   };
 }
@@ -605,7 +605,7 @@ export function normalizeArm(raw, fallbackArmedAt = Date.now()) {
       problems,
     ),
     /**
-     * 显式声明「本次武装期间会有人正常退出 DSH」。
+     * 显式声明「本次看护期间会有人正常退出 DSH」。
      * 外部看门狗无法区分「用户按 X 关闭」与「进程被强杀」，所以不猜：
      * 默认一律按故障拉起；要正常退出就先把这个标志写进 arm.json。
      */
@@ -1086,7 +1086,7 @@ export function classifyProbe(probe) {
  * 保持一致——本脚本要能脱离包结构独立跑（开发目录也直接用它），所以各留一份。
  *
  * 2026-11-22 真机教训：`restart_now` 打标记后，如果看门狗那一轮跑的时候新进程已经起来，
- * `resolveBoot` 会重建 boot、判 `signals=none`，既不走 graceful-exit 也不撤防，
+ * `resolveBoot` 会重建 boot、判 `signals=none`，既不走 graceful-exit 也不停止看护，
  * 标记就永久留在 arm.json 里；之后**真崩溃**会被当成正常退出而不救。标记必须自己会过期。
  */
 const GRACEFUL_MARK_TTL_MS = 10 * 60 * 1000;
@@ -1134,7 +1134,7 @@ export function evaluateSignals({
 
   const live = (procs || []).filter((proc) => proc.browser !== false && sameBoot(proc, boot));
   // boot 只在「进程表里真的见过它」时才会建立，所以 live 为空即确定消失。
-  // 宽限期曾把这条判定限制在启动后 120 秒内，导致武装超过两分钟后崩溃完全无信号。
+  // 宽限期曾把这条判定限制在启动后 120 秒内，导致看护超过两分钟后崩溃完全无信号。
   if (live.length === 0) {
     if (gracefulMarkValid(arm, now)) {
       signals.push({
@@ -1341,8 +1341,8 @@ export function normalizeBoot(raw) {
 }
 
 function buildBoot({ arm, armId, proc, now, crash }) {
-  // 基线必须取「武装时刻之前」的最新 crash：若取「第一次检查时」的最新文件，
-  // 武装后立刻发生的故障（2026-11-20 F2：kill renderer 9 秒后第一个 check）
+  // 基线必须取「启动看护时刻之前」的最新 crash：若取「第一次检查时」的最新文件，
+  // 启动看护后立刻发生的故障（2026-11-20 F2：kill renderer 9 秒后第一个 check）
   // 会被当成基线吞掉，之后再也不会报。
   const cutoff = arm.armedAtMs ?? now;
   const beforeArm = crash?.ok ? (crash.files.filter((file) => file.ts <= cutoff)[0] ?? null) : null;
@@ -1376,8 +1376,8 @@ function persistBoot(paths, boot, existing, { backup = true } = {}) {
 }
 
 /**
- * 选定「本次武装轮次下的那次启动」。
- * 武装前就存在的进程不算：必须 startedAt >= armedAt - 5s，否则视为尚未重启。
+ * 选定「本次看护轮次下的那次启动」。
+ * 启动看护前就存在的进程不算：必须 startedAt >= armedAt - 5s，否则视为尚未重启。
  */
 function resolveBoot({ paths, arm, armId, procs, crash, now, dryRun }) {
   const existingRaw = readJsonSafe(paths.boot);
@@ -1585,7 +1585,7 @@ function updateArmFailures(paths, failures) {
 
 /**
  * 清掉「主动重启」标记：新 boot 已建立（预期兑现）时调用。
- * 只删这两个字段，arm.json 其余内容原样保留——武装态继续有效。
+ * 只删这两个字段，arm.json 其余内容原样保留——看护状态继续有效。
  */
 function clearGracefulMark(paths) {
   const read = readJsonSafe(paths.arm);
@@ -1630,7 +1630,7 @@ function writeRecovered(paths, arm, attempt, attempts) {
 export function writeNeedsHuman(paths, arm, signals, attempts, failures) {
   const payload = {
     at: iso(Date.now()),
-    reason: `连续恢复失败 ${failures} 次，已撤防停手`,
+    reason: `连续恢复失败 ${failures} 次，已停止看护停手`,
     hint: '人工检查 recovery.log 与已备份的 asar；确认后在主人到场时执行 snapshot restore 或重新 arm。',
     arm: { tag: arm.tag, armedAt: arm.armedAt, failures },
     signals: signals.map((signal) => ({ type: signal.type, detail: signal.detail })),
@@ -1679,7 +1679,7 @@ export function lastAttemptSummary(attempts) {
   return `${last.level ?? '?'} @${last.at ?? '?'} ${detail || '未记录 detail'}`;
 }
 
-/** 人话摘要：失败次数、最后错误、已撤防。没通知通道时这就是唯一线索。 */
+/** 人话摘要：失败次数、最后错误、已停止看护。没通知通道时这就是唯一线索。 */
 export function needsHumanMarkdown(payload) {
   const failures = payload?.arm?.failures ?? '?';
   const last = lastAttemptSummary(payload?.attempts);
@@ -1690,13 +1690,13 @@ export function needsHumanMarkdown(payload) {
     `- 原因：${payload?.reason ?? '(未知)'}`,
     `- 失败次数：${failures}`,
     `- 最后一次失败：${last || '(没有留下尝试记录)'}`,
-    '- 已撤防：是。arm.json 已移到 disarm/，看门狗不会再自动重试。',
+    '- 已停止看护：是。arm.json 已移到 disarm/，看门狗不会再自动重试。',
     '',
     '## 接下来怎么做',
     '',
     '1. 看 `recovery.log` 与 `disarm/` 里最新那份 arm*.json，确认这一轮做了什么。',
     '2. 手工跑一次快照恢复：`node tools/ownshield/snapshot.mjs restore <tag> --dry-run` 先干跑。',
-    '3. 确认无误后再重新武装（写回 arm.json），武装时间必须早于本次 DSH 主进程启动。',
+    '3. 确认无误后再重新启动看护（写回 arm.json），启动看护时间必须早于本次 DSH 主进程启动。',
   ];
   const signals = Array.isArray(payload?.signals) ? payload.signals : [];
   if (signals.length) {
@@ -1721,14 +1721,14 @@ export function notifyNeedsHuman({ paths, arm, payload, now = Date.now() }) {
     recovered: false,
     snapshotTag: arm?.tag ?? '',
     rollbackFiles: [],
-    // 取运行时累计值：arm.failures 是武装那一刻的快照（通常 0），拿它会把 3 次写成 0 次。
+    // 取运行时累计值：arm.failures 是看护那一刻的快照（通常 0），拿它会把 3 次写成 0 次。
     note: `连续恢复失败 ${payload?.arm?.failures ?? arm?.failures ?? '?'} 次后停手`,
     errorTail: [
       `原因：${payload?.reason ?? ''}`,
       `最后错误：${lastAttemptSummary(payload?.attempts) || '未记录'}`,
-      `已撤防：arm.json 已移入 disarm/`,
+      `已停止看护：arm.json 已移入 disarm/`,
     ],
-    prompt: 'ownshield 看门狗已熔断停手：连续恢复失败，已自动撤防。请先解释根因、再给最小修复方案，不要自动重试或重启。',
+    prompt: 'ownshield 看门狗已熔断停手：连续恢复失败，已自动停止看护。请先解释根因、再给最小修复方案，不要自动重试或重启。',
   };
   const sessionId = typeof arm?.notifySessionId === 'string' ? arm.notifySessionId.trim() : '';
   const injectFile = sessionId
@@ -2275,7 +2275,7 @@ function runLocked({ opts, paths, arm, armId, now, t0 }) {
 
   const decision = decideRecovery({ signals, strikes, confirmations: arm.confirmations });
   const effectiveDecision = bootInfo.waiting
-    ? { action: 'none', reason: 'waiting-for-boot（武装后尚未出现新启动）', waiting: true }
+    ? { action: 'none', reason: 'waiting-for-boot（启动看护后尚未出现新启动）', waiting: true }
     : decision;
   const base = {
     version: WATCH_VERSION,
@@ -2358,11 +2358,11 @@ function runLocked({ opts, paths, arm, armId, now, t0 }) {
       });
     }
     base.needsHuman = true;
-    base.decision = { ...decision, action: 'needs-human', reason: '观测基础设施异常，已撤防' };
+    base.decision = { ...decision, action: 'needs-human', reason: '观测基础设施异常，已停止看护' };
     return { exitCode: EXIT.NEEDS_HUMAN, output: base };
   }
 
-  // ---- 正常退出：武装时显式声明过，不拉起、直接撤防 ----
+  // ---- 正常退出：启动看护时显式声明过，不拉起、直接停止看护 ----
   if (signals.some((signal) => signal.type === 'graceful-exit')) {
     const graceful = signals.find((signal) => signal.type === 'graceful-exit');
     state.lastCheckAt = iso(now);
@@ -2716,8 +2716,8 @@ function runLocked({ opts, paths, arm, armId, now, t0 }) {
     if (ok) {
       recovered = true;
       writeRecovered(paths, arm, attempt, state.attempts);
-      // 一次武装只管一次：救回来就撤防，别让它在背后长期持有回滚权。
-      // 要再守护，重新武装（改内核前建快照 → 写 arm.json）。
+      // 一次看护只管一次：救回来就停止看护，别让它在背后长期持有回滚权。
+      // 要再守护，重新启动看护（改内核前建快照 → 写 arm.json）。
       const dest = disarm(paths, 'recovered');
       appendLog(paths, {
         event: 'recover',
@@ -2836,7 +2836,7 @@ export function runWatch(opts) {
 
   /**
    * 只读诊断块：进程名 / 崩溃日志目录（含来源）/ 安装 asar / 磁盘剩余。
-   * 未武装的每分钟那一跑也要能看到自己用的是哪一套路径，否则换机器后
+   * 未在看护的每分钟那一跑也要能看到自己用的是哪一套路径，否则换机器后
    * 「什么都没发生」根本没法查。statfs 与 existsSync 都是只读、无子进程。
    */
   const diagnostics = () => {
@@ -2850,8 +2850,8 @@ export function runWatch(opts) {
   };
 
   if (!armRead.exists) {
-    // 未武装也守一件事：本地 Web 登录 cookie 过期。它不来自任何故障，只是时间到了，
-    // 「按需武装」不该让它等到下次武装才被发现——代价是读两个文件，不是常驻守护。
+    // 未在看护也守一件事：本地 Web 登录 cookie 过期。它不来自任何故障，只是时间到了，
+    // 「按需看护」不该让它等到下次看护才被发现——代价是读两个文件，不是常驻守护。
     // 空串要走默认值（$DSH_HOME 或 ~/.dsh），不能当路径传下去。
     const cookieHome = opts.dshHome && String(opts.dshHome).trim() !== '' ? opts.dshHome : undefined;
     const cookie =
@@ -2941,7 +2941,7 @@ export function runWatch(opts) {
         ...diagnostics(),
         cookieGuard: cookie,
         restart,
-        decision: { action: 'recover', reason: `cookie-stale（未武装也重启，不回滚）· ${cookie.detail}` },
+        decision: { action: 'recover', reason: `cookie-stale（未在看护也重启，不回滚）· ${cookie.detail}` },
         exitCode: restart.ok ? EXIT.RECOVERED : EXIT.ERROR,
       },
     };
@@ -3038,7 +3038,7 @@ export function runWatch(opts) {
 // 输出
 // ---------------------------------------------------------------------------
 
-/** 未武装/武装态都要露出的只读诊断（换机器后排查全靠这几行）。 */
+/** 未在看护/看护状态都要露出的只读诊断（换机器后排查全靠这几行）。 */
 function pushDiagnostics(out, lines) {
   if (out.processName) lines.push(`  进程名: ${out.processName}`);
   if (out.logs) lines.push(`  崩溃日志目录: ${out.logs.dir}（来源 ${out.logs.source}）`);
@@ -3066,12 +3066,12 @@ function renderHuman(result) {
     const suffix = typeof cookie === 'string' ? ` · cookie 守卫: ${cookie}` : '';
     if (out.restart) {
       lines.push(
-        `[ownshield-watch] 未武装 · cookie 过期 → ${out.restart.ok ? `已重启 pid=${out.restart.pid}` : `重启失败：${out.restart.error}`}`,
+        `[ownshield-watch] 未在看护 · cookie 过期 → ${out.restart.ok ? `已重启 pid=${out.restart.pid}` : `重启失败：${out.restart.error}`}`,
       );
       lines.push(`  判定: ${out.decision?.reason ?? ''}`);
       return lines;
     }
-    lines.push(`[ownshield-watch] 未武装：arm.json 不存在${suffix}`);
+    lines.push(`[ownshield-watch] 未在看护：arm.json 不存在${suffix}`);
     if (cookie && typeof cookie === 'object') lines.push(`  判定: ${out.decision?.reason ?? ''}`);
     pushDiagnostics(out, lines);
     return lines;
@@ -3082,7 +3082,7 @@ function renderHuman(result) {
   );
   if (out.error) lines.push(`  错误: ${out.error}`);
   lines.push(
-    `  进程: ${out.process.name ? `${out.process.name} ` : ''}${out.process.ok ? `${out.process.count} 个` : `查询失败（${out.process.error}）`}；武装后启动匹配 ${out.process.underArm}`,
+    `  进程: ${out.process.name ? `${out.process.name} ` : ''}${out.process.ok ? `${out.process.count} 个` : `查询失败（${out.process.error}）`}；启动看护后启动匹配 ${out.process.underArm}`,
   );
   if (out.install) lines.push(`  安装: exe=${out.install.exe || '(未探测到)'} asar=${out.install.asar || '(未探测到)'}`);
   if (out.logs) lines.push(`  崩溃日志目录: ${out.logs.dir}（来源 ${out.logs.source}）`);
@@ -3091,7 +3091,7 @@ function renderHuman(result) {
       `  boot: pid=${out.boot.pid} startedAt=${iso(out.boot.startedAt)} graceUntil=${iso(out.boot.graceUntil)}`,
     );
   } else {
-    lines.push('  boot: 尚未检测到武装后的启动（等待重启后继续，不做任何动作）');
+    lines.push('  boot: 尚未检测到启动看护后的启动（等待重启后继续，不做任何动作）');
   }
   lines.push(
     `  crash: ${out.crash.ok ? `最新 ${out.crash.newest ? `${out.crash.newest.name} @ ${out.crash.newest.at}` : '无'}` : `目录不可读（${out.crash.error}）`}`,
@@ -3119,11 +3119,11 @@ function renderHuman(result) {
   if (out.busy) {
     lines.push('  判定: 跳过（另一轮看门狗持有锁）');
   } else if (out.needsHuman) {
-    lines.push('  判定: 交人（已写 needs-human.json 并撤防）');
+    lines.push('  判定: 交人（已写 needs-human.json 并停止看护）');
   } else if (out.recovered) {
     lines.push(`  判定: 已恢复（${out.attempts.at(-1)?.level} → ${out.attempts.at(-1)?.tag}）`);
   } else if (out.waiting) {
-    lines.push('  判定: 等待武装后的启动（尚未看到 armedAt 之后的新进程，不做任何动作）');
+    lines.push('  判定: 等待启动看护后的启动（尚未看到 armedAt 之后的新进程，不做任何动作）');
   } else if (out.decision?.action === 'recover') {
     lines.push(
       `  判定: ${out.dryRun ? '将执行' : '执行'} ${out.decision.level}（tag=${out.decision.tag}；${out.decision.reason}）`,
@@ -3181,7 +3181,7 @@ function main() {
     return EXIT.OK;
   }
   if (opts.checkSnapshot) {
-    // 武装前的自检：快照能不能用来回滚。武装后看门狗也会在恢复前再核一次。
+    // 启动看护前的自检：快照能不能用来回滚。启动看护后看门狗也会在恢复前再核一次。
     const guard = checkSnapshotGuard(opts.checkSnapshot);
     if (opts.json) {
       console.log(JSON.stringify({ tag: opts.checkSnapshot, ...guard }, null, 2));

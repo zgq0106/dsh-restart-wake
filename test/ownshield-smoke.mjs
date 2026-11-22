@@ -572,8 +572,8 @@ try {
       '自动回滚',
       '三次',
       'ownshield_status',
-      '撤防',
-      '不要武装',
+      '停止看护',
+      '不要看护',
     ]) {
       assert.ok(text.includes(needle), `prompt 缺要点：${needle}`)
     }

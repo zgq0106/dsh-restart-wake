@@ -36,7 +36,7 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node test/smoke.mjs && node test/ownshield-smoke.mjs && node test/bridge.test.mjs && node test/inject/smoke.mjs && node test/inject/probe-gate.test.mjs && node test/inject/request-watch.test.mjs && node scripts/ownshield/watch.test.mjs && node scripts/ownshield/cookie-guard.test.mjs"
+    "test": "node test/smoke.mjs && node test/ownshield-smoke.mjs && node test/bridge.test.mjs && node test/prune.test.mjs && node test/inject/smoke.mjs && node test/inject/probe-gate.test.mjs && node test/inject/request-watch.test.mjs && node scripts/ownshield/watch.test.mjs && node scripts/ownshield/cookie-guard.test.mjs"
   },
   "engines": {
     "node": "^22.19.0 || >=24.0.0",
