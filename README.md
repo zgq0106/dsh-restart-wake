@@ -244,6 +244,8 @@ node <包目录>\scripts\cookie-cleanup.mjs "$env:APPDATA\@deepseek-ai\dsh-deskt
 
 ### 七项检查
 
+**默认只跑后四项**（工具 / 服务 / 心跳 / 凭据）：零会话、零 token、用户完全无感。前三项会建临时会话，只在传 `deep: true` 时执行，用完自动归档会话并删临时目录。
+
 | 检查 | 动作 | 抓什么 |
 |---|---|---|
 | `create-session` | 用默认预设创建临时会话，cwd 用系统临时目录 | `agent-preset/invalid`、`agent-preset/not-found`、工具组重复导致建会话失败 |

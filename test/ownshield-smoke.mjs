@@ -248,6 +248,36 @@ try {
     assert.ok(registered[0].output.schema.required.includes('path'))
   })
 
+  /* 默认静态：不建会话 */
+
+  await testAsync('ownshield_probe 默认只跑静态四项，不建会话', async () => {
+    const dir = join(workDir, 'static')
+    writeBaseline(dir, ['read'])
+    let created = 0
+    const controller = makeController()
+    const originalCreate = controller.create
+    controller.create = async (...callArgs) => {
+      created += 1
+      return originalCreate.apply(controller, callArgs)
+    }
+    const { ctx, registered } = makeCtx({ controller })
+    applyOwnshieldHalf(ctx, {
+      ownshieldDir: dir,
+      tmpBase: join(workDir, 'tmp'),
+      probeTimeoutMs: 1000,
+      probePollMs: 10,
+    })
+
+    const value = await registered[0].execute({})
+    assert.equal(created, 0, '默认不该建会话（用户无感）')
+    assert.equal(value.sessionId, undefined, '默认不该返回 sessionId')
+    assert.equal(value.checks.length, 7)
+    for (const check of value.checks.slice(0, 3)) {
+      assert.equal(check.ok, true)
+      assert.match(check.detail, /默认跳过/)
+    }
+  })
+
   /* happy path */
 
   await testAsync('ownshield_probe writes a complete probe artifact', async () => {
@@ -263,7 +293,7 @@ try {
     })
     const tool = registered[0]
 
-    const value = await tool.execute({}, { agent })
+    const value = await tool.execute({ deep: true }, { agent })
     assert.equal(scopeSeen.includes(agent), true, 'inventory must use the calling agent scope')
     assert.equal(value.ok, true)
     assert.equal(typeof value.ts, 'string')
@@ -326,7 +356,7 @@ try {
       probePollMs: 10,
     })
 
-    const value = await registered[0].execute({})
+    const value = await registered[0].execute({ deep: true })
     const serviceCheck = value.checks.find((check) => check.name === 'service-inventory')
     assert.equal(serviceCheck.ok, false)
     assert.ok(serviceCheck.error.includes('betaService'), 'missing service must be named')
@@ -351,7 +381,7 @@ try {
       probePollMs: 10,
     })
 
-    const value = await registered[0].execute({})
+    const value = await registered[0].execute({ deep: true })
     const serviceCheck = value.checks.find((check) => check.name === 'service-inventory')
     assert.equal(serviceCheck.ok, true)
     assert.equal(serviceCheck.error, '')
@@ -376,7 +406,7 @@ try {
       probeTimeoutMs: 1000,
       probePollMs: 10,
     })
-    const value = await registered[0].execute({})
+    const value = await registered[0].execute({ deep: true })
 
     const inventory = value.checks.find((check) => check.name === 'tool-inventory')
     assert.equal(inventory.ok, true)
@@ -397,7 +427,7 @@ try {
       probeTimeoutMs: 1000,
       probePollMs: 10,
     })
-    const value = await registered[0].execute({})
+    const value = await registered[0].execute({ deep: true })
 
     const inventory = value.checks.find((check) => check.name === 'tool-inventory')
     assert.equal(inventory.ok, false)
@@ -419,7 +449,7 @@ try {
       probeTimeoutMs: 1000,
       probePollMs: 10,
     })
-    const value = await registered[0].execute({})
+    const value = await registered[0].execute({ deep: true })
     const inventory = value.checks.find((check) => check.name === 'tool-inventory')
     assert.equal(inventory.ok, true)
     assert.ok(inventory.detail.includes('extra=2'))
@@ -436,7 +466,7 @@ try {
       probeTimeoutMs: 1000,
       probePollMs: 10,
     })
-    const value = await registered[0].execute({})
+    const value = await registered[0].execute({ deep: true })
     const inventory = value.checks.find((check) => check.name === 'tool-inventory')
     assert.equal(inventory.ok, false)
     assert.ok(inventory.error.length > 0)
@@ -456,7 +486,7 @@ try {
       probeTimeoutMs: 500,
       probePollMs: 10,
     })
-    const value = await registered[0].execute({})
+    const value = await registered[0].execute({ deep: true })
 
     assert.equal(value.ok, false)
     const create = value.checks.find((check) => check.name === 'create-session')
@@ -485,7 +515,7 @@ try {
       probeTimeoutMs: 1000,
       probePollMs: 10,
     })
-    const value = await registered[0].execute({})
+    const value = await registered[0].execute({ deep: true })
 
     const resume = value.checks.find((check) => check.name === 'resume-probe-session')
     assert.equal(resume.ok, true)
@@ -506,7 +536,7 @@ try {
       probeTimeoutMs: 120,
       probePollMs: 10,
     })
-    const value = await registered[0].execute({})
+    const value = await registered[0].execute({ deep: true })
 
     assert.equal(value.ok, false)
     const prompt = value.checks.find((check) => check.name === 'prompt-first-turn')
@@ -519,7 +549,7 @@ try {
     const dir = join(workDir, 'no-controller')
     const { ctx, registered } = makeCtx({ controller: undefined })
     applyOwnshieldHalf(ctx, { ownshieldDir: dir })
-    await assert.rejects(() => registered[0].execute({}), /sessionController 不可用/)
+    await assert.rejects(() => registered[0].execute({ deep: true }), /sessionController 不可用/)
   })
 
   test('tool list exposes the five tools, each with schema + render', () => {
