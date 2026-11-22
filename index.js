@@ -26,6 +26,7 @@ import { resolveConfig } from './lib/config.js'
 import { resolveOwnshieldConfig } from './lib/config-ownshield.js'
 import { resolveInjectConfig } from './lib/config-inject.js'
 import { startInjectLoop } from './lib/inject.js'
+import { runProbe } from './lib/probe.js'
 import { runProbeGate } from './lib/probe-gate.js'
 import { registerPrompt } from './lib/prompt.js'
 import { startRequestWatch } from './lib/request-watch.js'
@@ -208,6 +209,9 @@ export function startProbeGate(ctx, options) {
         probeSessionId: options.probeSessionId || notifySessionFromArm(options.injectDir),
         intervalMs: options.probeIntervalMs,
         probeTimeoutMs: options.probeTimeoutMs,
+        // 合包后探针就在同一个包里：Host 侧直调，不再往用户会话投「请跑探针」。
+        // 投递式自检会在会话里留一条用户看得见的指令，对小白用户等于「有感」。
+        probeFn: () => runProbe(ctx, options, undefined),
         requestProbe: (args) => writeProbeRequest(options.injectDir, args),
         log: (message) => {
           try {
