@@ -1,7 +1,7 @@
 {
   "name": "dsh-restart-wake",
   "version": "2.1.0",
-  "description": "Restart DeepSeek Harness safely and wake sessions automatically afterwards. Agent tools for scheduled self-restart, a startup wake registry, and a mutex-guarded restart protocol; the same package also carries self-healing: function probes, asar snapshots, a watchdog that rolls back and restarts, and crash-report re-injection into the affected session. 让 Agent 安全重启 DeepSeek Harness，并在重启后自动唤醒原会话继续工作；同一个包还内置本体自愈——功能探针、asar 快照、看门狗自动回滚重启，以及把故障现场回注原会话。",
+  "description": "Restart DeepSeek Harness safely and wake sessions automatically afterwards. The same package also carries self-healing: when a kernel change breaks Harness, the watchdog rolls back, restarts, verifies, brings the model back online, and injects the crash scene into the affected session so the model can fix it itself. 让 Agent 安全重启 DeepSeek Harness 并自动唤醒原会话；同一个包内置自愈——改内核改坏了，看门狗回滚重启校验、把模型救回在线，并把故障现场注入原会话，由模型自己动手修。",
   "license": "MIT",
   "author": "zgq0106 (https://github.com/zgq0106)",
   "repository": {

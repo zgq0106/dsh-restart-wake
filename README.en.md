@@ -1,10 +1,14 @@
 # dsh-restart-wake
 
-**Restart DeepSeek Harness safely, come back to the same conversation afterwards, and keep a rollback net while you edit the core.**
+**Restart DeepSeek Harness safely, come back to the same conversation afterwards, and when a kernel change breaks it, revive the model so the model can fix it itself.**
 
 One package, eleven Agent tools, one set of startup hooks: restart & wake, core probes, snapshots with a watchdog, and failure re-injection.
 
-**Boundaries first**: it does not analyse errors, does not edit code, and does not fix bugs. The only "self-healing" action it has is swapping `app.asar` (or the profile layer) back to the file as it was when you took the snapshot, then restarting. **A rollback means giving up your kernel change, not making the mistake correct.** It is also not resident: until you call `ownshield_arm`, it does nothing on its own.
+**One sentence: it brings the model back, and the model does the fixing.**
+
+Harness crashes, hangs, or starts but can no longer run after a kernel change — and then the model cannot work at all. Without this package a human has to dig through logs, swap files by hand, restart, and pick the conversation back up. With it: the watchdog notices within a minute, rolls `app.asar` (or the profile layer) back to the snapshot, restarts, verifies, gets Harness back to "the model can create sessions and call tools", and injects the scene — crash cause, failure record, the goal that was interrupted — into the affected session. **The model comes back online, reads the scene, and fixes it itself.**
+
+The plugin does no root-cause analysis and edits no code; it guarantees the model gets back online with the scene that broke it. Not resident by default: until you call `ownshield_arm`, it does nothing on its own.
 
 - Package: `dsh-restart-wake`
 - Version: **2.1.0**
@@ -45,15 +49,15 @@ Some failures never write a crash log: Harness starts, the UI works, but creatin
 
 The chain is not resident: only a watchdog with `arm.json` present holds rollback power.
 
-**The most common misunderstanding: rollback is not repair.**
+**Who does what:**
 
-| You might think | Reality |
+| Actor | Job |
 |---|---|
-| It understands the error and fixes the code | It only swaps the file back to the snapshot version; the broken code stays broken |
-| It protects you from the moment it is installed | Not resident by default; the watchdog holds rollback power only after `ownshield_arm` |
-| It can recover from anything | It only handles "core-layer breakage that can be rolled back"; feature bugs, plugin logic errors, network, credentials and disk problems are out of scope |
-| A rollback loses sessions and memory | Snapshots contain only `app.asar` and the profile layer; sessions, memory and credentials under `~/.dsh` are untouched |
-| Once fixed, nobody needs to look | Three consecutive failures trip the breaker: it writes `needs-human.json` and hands over — it never retries forever |
+| The plugin | Notice the break → roll files back → restart → verify "the model can create sessions and call tools" → deliver the scene into the affected session (cause, failure record, interrupted goal) |
+| The model | Once revived, read the scene, find the root cause, fix the code itself, and resume the original work |
+| The human | Everything while nothing is armed; handling after three consecutive failures (the plugin writes `needs-human.json` and stops, never retrying forever) |
+
+So the accurate phrasing is "**the plugin revives, the model repairs**". The plugin does not guess at root causes and edits no code — it makes sure the model gets back online carrying the scene from the moment of failure. That is also why acceptance is "the model can create a session and call tools", not "the error disappeared".
 
 A third, quieter capability: **failure re-injection**. Recovery reports written when the watchdog gives up are delivered back into the affected session on the next startup (and every 5 minutes while running); a failing model request (`401` / `429`) injects its failure scene into the current conversation so the model can see it and tell the user.
 
@@ -81,23 +85,29 @@ What it does **not** recover:
 5. **Blind spots with no signal**: a renderer that goes white without a log, a window that stops responding, a corrupted session file, a credential revoked server-side, a third-party plugin throwing inside `apply()`, and **code that still boots but no longer works**.
 6. **The limits of "in place"**: what comes back is a new process. The session is restored from disk and resumed; tool calls that never landed and half-written files are not repaired.
 
-One more note: this chain does not care who caused the failure — it only recognises "a rollbackable break in the kernel layer". So "failures caused by the model" is not a special coverage area; do not market that qualifier as a capability. Likewise, **do not call it error repair**: it swaps files back and writes no patch of its own.
+One more note: this chain does not care who caused the failure — it only recognises "a rollbackable break in the kernel layer". So "failures caused by the model" is not a special coverage area; do not market that qualifier as a capability. The standard phrasing is "**the plugin revives, the model repairs**": the plugin's output is "the model can work again", not "the bug is fixed" — root-cause analysis and code changes happen after the model is back online.
 
 ---
 
-### Can I use it on DSH 0.2.1?
+### DSH version compatibility
 
-Not fully, and this is not a supported combination.
+`package.json` declares `engines.dsh: ">=0.2.2-alpha.2"`, so a mismatched version is **rejected by the compatibility check at install time** — it never gets installed only to break later. Pick by the DSH you have:
 
-DSH `0.2.2-alpha.2` changed the Schedule tools: the time argument moved from `after_seconds` to the required `rrule` + `target`, and `schedule_update` / `schedule_delete` were replaced by `schedule_edit`. The protocol prompt this plugin injects — which every Agent sees on every step — is written for the new shape, so on 0.2.1 it points at tools that do not exist; any "have the Agent create or edit a reminder" flow fails with an unknown tool.
+| DSH version | Plugin version to use | Notes |
+|---|---|---|
+| `≥ 0.2.2-alpha.2` | **2.x (currently 2.1.0)** | Tested on `0.2.2-rc.2`; 11 tools including self-healing. `0.2.2-alpha.2` – `0.2.2-rc.1` not tested individually |
+| `0.2.1` (incl. `0.2.1-rc.x`) | **v0.1.5** | Tested on `0.2.1-rc.5`; restart & wake only, **no self-healing**. v0.1.5 declares no `engines.dsh`, so nothing blocks it |
+| Older (0.1.x, 0.2.0) | v0.1.5, unverified | Installs, but untested; upgrade DSH first |
 
-The restart & wake chain does not use those tools, so 2.x may still limp along on 0.2.1 — but it has never been tested there and is not promised. Upgrade DSH to `≥ 0.2.2-alpha.2` before using 2.x.
+The split is at `0.2.2-alpha.2`, which changed the Schedule tools: the time argument moved from `after_seconds` to the required `rrule` + `target`, and `schedule_update` / `schedule_delete` were replaced by `schedule_edit`. The protocol prompt this plugin injects — which every Agent sees on every step — follows the new shape; on an older DSH it points at tools that do not exist, so any "have the Agent create or edit a reminder" flow fails. This is not "mostly works" — it is the wrong version pairing.
 
-If you must stay on 0.2.1, install v0.1.5 (prompts written for the old tool names; restart & wake only, no self-healing):
+Pin an older release by tag:
 
 ```powershell
 dsh plugin --profile desktop add github:zgq0106/dsh-restart-wake#v0.1.5
 ```
+
+Upgrade order: bring DSH to `≥ 0.2.2-alpha.2` first, then move to 2.x. The other way round is rejected at install.
 
 ## Install
 
