@@ -4,11 +4,13 @@
 
 One package, eleven Agent tools, one set of startup hooks: restart & wake, core probes, snapshots with a watchdog, and failure re-injection.
 
-**One sentence: it brings the model back, and the model does the fixing.**
+**Two main things: the Agent restarts Harness itself and keeps working, and a broken kernel gets revived so the model can fix it itself.**
 
-Harness crashes, hangs, or starts but can no longer run after a kernel change — and then the model cannot work at all. Without this package a human has to dig through logs, swap files by hand, restart, and pick the conversation back up. With it: the watchdog notices within a minute, rolls `app.asar` (or the profile layer) back to the snapshot, restarts, verifies, gets Harness back to "the model can create sessions and call tools", and injects the scene — crash cause, failure record, the goal that was interrupted — into the affected session. **The model comes back online, reads the scene, and fixes it itself.**
+**1. Restart & wake.** After editing `src/`, a plugin or the config, the Host must restart. `restart_now` lets the Agent schedule that restart itself: a Task Scheduler job runs outside the process tree (bypassing the Windows Job Object), writes "what to do on wake-up" to a registry file before restarting, and once the new process is ready the startup waker delivers it and resumes the session — the Agent lands back in the same conversation and continues the same work, with no one to click anything. Restarts are refused by default while other sessions are running; several sessions can each register and all get woken after the restart (`wake_register`). During the restart window it also prunes `dsh-auth-*` cookies so they never pile up into a 431 startup crash.
 
-The plugin does no root-cause analysis and edits no code; it guarantees the model gets back online with the scene that broke it. Not resident by default: until you call `ownshield_arm`, it does nothing on its own.
+**2. Revive the model, and the model does the fixing.** Harness crashes, hangs, or starts but can no longer run after a kernel change — and then the model cannot work at all. Without this package a human has to dig through logs, swap files by hand, restart, and pick the conversation back up. With it: the watchdog notices within a minute, rolls `app.asar` (or the profile layer) back to the snapshot, restarts, verifies, gets Harness back to "the model can create sessions and call tools", and injects the scene — crash cause, failure record, the goal that was interrupted — into the affected session. **The model comes back online, reads the scene, and fixes it itself.**
+
+For the second job the plugin does no root-cause analysis and edits no code; it guarantees the model gets back online with the scene that broke it. Not resident by default: until you call `ownshield_arm`, it does nothing on its own.
 
 - Package: `dsh-restart-wake`
 - Version: **2.1.0**
