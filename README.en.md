@@ -4,6 +4,8 @@
 
 One package, eleven Agent tools, one set of startup hooks: restart & wake, core probes, snapshots with a watchdog, and failure re-injection.
 
+**Boundaries first**: it does not analyse errors, does not edit code, and does not fix bugs. The only "self-healing" action it has is swapping `app.asar` (or the profile layer) back to the file as it was when you took the snapshot, then restarting. **A rollback means giving up your kernel change, not making the mistake correct.** It is also not resident: until you call `ownshield_arm`, it does nothing on its own.
+
 - Package: `dsh-restart-wake`
 - Version: **2.1.0**
 - Platform: **restart, cookie cleanup and the self-healing chain are Windows-only**; wake-up, registration and status queries are cross-platform
@@ -43,6 +45,16 @@ Some failures never write a crash log: Harness starts, the UI works, but creatin
 
 The chain is not resident: only a watchdog with `arm.json` present holds rollback power.
 
+**The most common misunderstanding: rollback is not repair.**
+
+| You might think | Reality |
+|---|---|
+| It understands the error and fixes the code | It only swaps the file back to the snapshot version; the broken code stays broken |
+| It protects you from the moment it is installed | Not resident by default; the watchdog holds rollback power only after `ownshield_arm` |
+| It can recover from anything | It only handles "core-layer breakage that can be rolled back"; feature bugs, plugin logic errors, network, credentials and disk problems are out of scope |
+| A rollback loses sessions and memory | Snapshots contain only `app.asar` and the profile layer; sessions, memory and credentials under `~/.dsh` are untouched |
+| Once fixed, nobody needs to look | Three consecutive failures trip the breaker: it writes `needs-human.json` and hands over — it never retries forever |
+
 A third, quieter capability: **failure re-injection**. Recovery reports written when the watchdog gives up are delivered back into the affected session on the next startup (and every 5 minutes while running); a failing model request (`401` / `429`) injects its failure scene into the current conversation so the model can see it and tell the user.
 
 ### 3. What it recovers, and what it does not
@@ -69,9 +81,23 @@ What it does **not** recover:
 5. **Blind spots with no signal**: a renderer that goes white without a log, a window that stops responding, a corrupted session file, a credential revoked server-side, a third-party plugin throwing inside `apply()`, and **code that still boots but no longer works**.
 6. **The limits of "in place"**: what comes back is a new process. The session is restored from disk and resumed; tool calls that never landed and half-written files are not repaired.
 
-One more note: this chain does not care who caused the failure — it only recognises "a rollbackable break in the kernel layer". So "failures caused by the model" is not a special coverage area; do not market that qualifier as a capability.
+One more note: this chain does not care who caused the failure — it only recognises "a rollbackable break in the kernel layer". So "failures caused by the model" is not a special coverage area; do not market that qualifier as a capability. Likewise, **do not call it error repair**: it swaps files back and writes no patch of its own.
 
 ---
+
+### Can I use it on DSH 0.2.1?
+
+Not fully, and this is not a supported combination.
+
+DSH `0.2.2-alpha.2` changed the Schedule tools: the time argument moved from `after_seconds` to the required `rrule` + `target`, and `schedule_update` / `schedule_delete` were replaced by `schedule_edit`. The protocol prompt this plugin injects — which every Agent sees on every step — is written for the new shape, so on 0.2.1 it points at tools that do not exist; any "have the Agent create or edit a reminder" flow fails with an unknown tool.
+
+The restart & wake chain does not use those tools, so 2.x may still limp along on 0.2.1 — but it has never been tested there and is not promised. Upgrade DSH to `≥ 0.2.2-alpha.2` before using 2.x.
+
+If you must stay on 0.2.1, install v0.1.5 (prompts written for the old tool names; restart & wake only, no self-healing):
+
+```powershell
+dsh plugin --profile desktop add github:zgq0106/dsh-restart-wake#v0.1.5
+```
 
 ## Install
 
